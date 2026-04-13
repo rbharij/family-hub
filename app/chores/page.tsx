@@ -444,13 +444,13 @@ export default function ChoresPage() {
                     key={i}
                     className={cn(
                       "border-b border-r last:border-r-0 px-2 py-2 text-center text-xs font-medium",
-                      isToday ? "bg-primary/10 text-primary" : "bg-muted/40 text-muted-foreground",
+                      isToday ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground",
                     )}
                   >
-                    <div>{WEEKDAY_LABELS[i]}</div>
+                    <div className="font-bold">{WEEKDAY_LABELS[i]}</div>
                     <div className={cn(
                       "text-[10px] font-normal",
-                      isToday ? "text-primary" : "text-muted-foreground/70",
+                      isToday ? "opacity-80" : "text-muted-foreground/70",
                     )}>
                       {day.getDate()}
                     </div>
@@ -507,7 +507,7 @@ export default function ChoresPage() {
                       className={cn(
                         "border-b border-r last:border-r-0 px-1.5 py-1.5 align-top",
                         "min-h-[72px] cursor-pointer group/cell transition-colors",
-                        isToday ? "bg-primary/5" : "hover:bg-muted/30",
+                        isToday ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-muted/30",
                       )}
                       onClick={() => openCreate(toDateStr(day), member?.id)}
                     >

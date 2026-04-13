@@ -313,8 +313,10 @@ export default function CalendarPage() {
                   return (
                     <div key={di} className={cn(
                       "border-r last:border-r-0 p-1 min-w-0",
-                      !inMonth && "bg-muted/20",
-                    )}>
+                      !isToday && !inMonth && "bg-muted/20",
+                    )}
+                    style={isToday ? { backgroundColor: "hsl(var(--primary) / 0.08)" } : undefined}
+                    >
                       <div className="flex justify-center items-center h-7">
                         <span className={cn(
                           "flex items-center justify-center w-7 h-7 rounded-full",
