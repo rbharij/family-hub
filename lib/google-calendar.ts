@@ -51,10 +51,12 @@ interface MappedEvent {
   start_at: string
   end_at: string | null
   is_all_day: boolean
-  color: string
   google_event_id: string
   google_origin: boolean
 }
+
+// New events inserted from Google get this default colour (can be changed in the app)
+const GOOGLE_DEFAULT_COLOR = "#534AB7"
 
 function mapGoogleEvent(event: calendar_v3.Schema$Event): MappedEvent | null {
   if (!event.id) return null
@@ -72,7 +74,6 @@ function mapGoogleEvent(event: calendar_v3.Schema$Event): MappedEvent | null {
     start_at:        toISO(startRaw),
     end_at:          endRaw ? toISO(endRaw, isAllDay) : null,
     is_all_day:      isAllDay,
-    color:           "#534AB7",
     google_event_id: event.id,
     google_origin:   true,
   }
@@ -155,11 +156,23 @@ export async function syncGoogleCalendar(): Promise<{ synced: number; skipped: n
 
   if (toUpsert.length === 0) return { synced: 0, skipped }
 
-  const { error } = await supabase
-    .from("events")
-    .upsert(toUpsert, { onConflict: "google_event_id" })
+  // Split: new events (not yet in Supabase) vs existing events being updated.
+  // New events get a default colour; existing events must NOT have their colour
+  // overwritten — the user may have changed it in the app.
+  const newEvents      = toUpsert.filter((e) => !supabaseUpdatedMap.has(e.google_event_id))
+  const existingEvents = toUpsert.filter((e) =>  supabaseUpdatedMap.has(e.google_event_id))
 
-  if (error) throw new Error(`Supabase upsert failed: ${error.message}`)
+  if (newEvents.length > 0) {
+    const inserts = newEvents.map((e) => ({ ...e, color: GOOGLE_DEFAULT_COLOR }))
+    const { error } = await supabase.from("events").upsert(inserts, { onConflict: "google_event_id" })
+    if (error) throw new Error(`Supabase insert failed: ${error.message}`)
+  }
+
+  if (existingEvents.length > 0) {
+    // Update title/time/location/description but leave colour untouched
+    const { error } = await supabase.from("events").upsert(existingEvents, { onConflict: "google_event_id" })
+    if (error) throw new Error(`Supabase update failed: ${error.message}`)
+  }
 
   return { synced: toUpsert.length, skipped }
 }

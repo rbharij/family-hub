@@ -156,6 +156,8 @@ function formToPayload(form: EventForm) {
     start_at,
     end_at,
     color:       form.color,
+    // Stamp updated_at so Google sync conflict resolution knows this version is fresh
+    updated_at:  new Date().toISOString(),
   }
 }
 
