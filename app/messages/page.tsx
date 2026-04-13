@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { X, ChevronDown, ChevronUp, Send, MessageSquare } from "lucide-react"
+import { X, ChevronDown, ChevronUp, Send } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"

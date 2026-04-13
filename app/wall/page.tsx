@@ -199,7 +199,6 @@ export default function WallPage() {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const tomorrow    = addDays(today, 1)
-    const dayAfter    = addDays(today, 2)
     const weekEnd     = addDays(today, 7)
     const todayStr    = toDateStr(today)
     const tomorrowStr = toDateStr(tomorrow)

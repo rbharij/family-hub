@@ -113,7 +113,7 @@ export default function ShoppingPage() {
   }
 
   // ── Optimistic delete ────────────────────────────────────────────────────
-  function deleteItem(item: ShoppingItem, setLocalItems: (fn: (prev: ShoppingItem[]) => ShoppingItem[]) => void) {
+  function deleteItem(item: ShoppingItem) {
     // Optimistically remove from parent state
     setItems((prev) => prev.filter((i) => i.id !== item.id))
 
@@ -222,7 +222,7 @@ export default function ShoppingPage() {
                       loading={loading}
                       onAdd={(n, q) => addItem(list.id, n, q)}
                       onToggle={toggleItem}
-                      onDelete={(item) => deleteItem(item, setItems)}
+                      onDelete={(item) => deleteItem(item)}
                       onUpdate={updateItem}
                       onClearCompleted={() => clearCompleted(list.id)}
                       onClearAll={() => clearAll(list.id, name)}

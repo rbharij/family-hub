@@ -171,10 +171,12 @@ export default function CalendarPage() {
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function prevMonth() {
     setYm(({ year, month }) =>
       month === 0 ? { year: year - 1, month: 11 } : { year, month: month - 1 })
   }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function nextMonth() {
     setYm(({ year, month }) =>
       month === 11 ? { year: year + 1, month: 0 } : { year, month: month + 1 })

@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase"
 import {
   MEAL_LABELS, MEAL_EMOJIS, DAY_FULL,
-  type Meal, type MealType, type FamilyMember,
+  type Meal, type MealType,
 } from "./_utils"
 
 // ── Props ──────────────────────────────────────────────────────────────────────
