@@ -311,22 +311,24 @@ function ComposeDialog({
   onSent: () => void
 }) {
   const supabase = useRef(createClient()).current
-  const [toId, setToId]     = useState("")
-  const [body, setBody]     = useState("")
+  const [fromId, setFromId]   = useState(myId)
+  const [toId, setToId]       = useState("")
+  const [body, setBody]       = useState("")
   const [sending, setSending] = useState(false)
-  const [error, setError]   = useState<string | null>(null)
+  const [error, setError]     = useState<string | null>(null)
   const MAX = 280
 
   useEffect(() => {
-    if (open) { setToId(""); setBody(""); setError(null) }
-  }, [open])
+    if (open) { setFromId(myId); setToId(""); setBody(""); setError(null) }
+  }, [open, myId])
 
   async function handleSend() {
+    if (!fromId) { setError("Please select who this is from."); return }
     if (!toId) { setError("Please select a recipient."); return }
     if (!body.trim()) { setError("Please enter a message."); return }
     setSending(true); setError(null)
     const { error } = await supabase.from("messages").insert({
-      from_member_id: myId || null,
+      from_member_id: fromId || null,
       to_member_id: toId,
       body: body.trim(),
     })
@@ -337,8 +339,6 @@ function ComposeDialog({
     toast.success("Message sent!")
   }
 
-  const fromMember = members.find((m) => m.id === myId)
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -346,13 +346,28 @@ function ComposeDialog({
           <DialogTitle>New Message</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-1">
-          {fromMember && (
-            <div className="text-sm text-muted-foreground">
-              From: <span className="font-medium text-foreground">
-                {fromMember.avatar_emoji} {fromMember.name}
-              </span>
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label>From</Label>
+            <Select value={fromId} onValueChange={(v) => v && setFromId(v)}>
+              <SelectTrigger>
+                {fromId
+                  ? (() => {
+                      const m = members.find((x) => x.id === fromId)
+                      return m
+                        ? <span>{m.avatar_emoji} {m.name}</span>
+                        : <span className="text-muted-foreground">Select sender…</span>
+                    })()
+                  : <span className="text-muted-foreground">Select sender…</span>}
+              </SelectTrigger>
+              <SelectContent>
+                {members.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.avatar_emoji} {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5">
             <Label>To</Label>
             <Select value={toId} onValueChange={(v) => v && setToId(v)}>
@@ -367,7 +382,7 @@ function ComposeDialog({
                   : <span className="text-muted-foreground">Select recipient…</span>}
               </SelectTrigger>
               <SelectContent>
-                {members.filter((m) => m.id !== myId).map((m) => (
+                {members.filter((m) => m.id !== fromId).map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.avatar_emoji} {m.name}
                   </SelectItem>
