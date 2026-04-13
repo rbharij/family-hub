@@ -509,7 +509,7 @@ export default function CalendarPage() {
       </ErrorBoundary>
 
       {/* Event detail / edit sheet */}
-      <EventSheet event={selectedEvent} open={sheetOpen} onClose={closeSheet} />
+      <EventSheet event={selectedEvent} open={sheetOpen} onClose={closeSheet} onSaved={fetchEvents} />
     </div>
   )
 }

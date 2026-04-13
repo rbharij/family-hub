@@ -33,6 +33,7 @@ interface EventSheetProps {
   event: CalEvent | null       // null = create mode
   open: boolean
   onClose: () => void
+  onSaved?: () => void         // called after a successful save/delete
 }
 
 // ── Colour / Category config ───────────────────────────────────────────────────
@@ -163,7 +164,7 @@ function formToPayload(form: EventForm) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function EventSheet({ event, open, onClose }: EventSheetProps) {
+export function EventSheet({ event, open, onClose, onSaved }: EventSheetProps) {
   const isCreate = event === null
   const [mode, setMode]           = useState<SheetMode>(isCreate ? "create" : "view")
   const [form, setForm]           = useState<EventForm>(isCreate ? emptyForm() : eventToForm(event!))
@@ -309,6 +310,7 @@ export function EventSheet({ event, open, onClose }: EventSheetProps) {
           })
         }
       }
+      onSaved?.()
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.")
@@ -338,6 +340,7 @@ export function EventSheet({ event, open, onClose }: EventSheetProps) {
       }
 
       setConfirmOpen(false)
+      onSaved?.()
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed.")
