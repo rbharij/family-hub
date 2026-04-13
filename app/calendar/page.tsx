@@ -18,9 +18,15 @@ import {
   type CalEvent,
 } from "./_utils"
 import { EventSheet, CreateEventButton } from "./_event-sheet"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 // ── Stable realtime config (module-level so hook deps stay stable) ─────────────
-const CALENDAR_TABLES = [{ table: "events" }] as const
+const CALENDAR_TABLES = [{ table: "events" }, { table: "birthdays" }] as const
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -60,6 +66,46 @@ function formatTime(iso: string): string {
   })
 }
 
+// ── Birthday helpers ──────────────────────────────────────────────────────────
+
+const BIRTHDAY_PREFIX = "bdoy-"
+
+interface BirthdayRow { id:string; name:string; date:string; type:"birthday"|"anniversary"; color:string }
+
+function birthdayOccurrencesInRange(birthdays:BirthdayRow[], start:Date, end:Date): CalEvent[] {
+  const results:CalEvent[] = []
+  for (const b of birthdays) {
+    const [,m,d] = b.date.split("-").map(Number)
+    for (let yr = start.getFullYear()-1; yr <= end.getFullYear()+1; yr++) {
+      const occ = new Date(yr, m-1, d)
+      if (occ >= start && occ <= end) {
+        results.push({
+          id: `${BIRTHDAY_PREFIX}${b.id}|${yr}`,
+          title: `${b.type==="birthday"?"🎂":"❤️"} ${b.name}`,
+          description: null, location: null,
+          start_at: occ.toISOString(), end_at: null,
+          is_all_day: true, color: b.color, google_event_id: null,
+        })
+      }
+    }
+  }
+  return results
+}
+
+function daysUntilBirthday(dateStr:string, today:Date): number {
+  const [,m,d] = dateStr.split("-").map(Number)
+  const todayMs = today.getTime()
+  let occ = new Date(today.getFullYear(), m-1, d)
+  if (occ.getTime() < todayMs) occ = new Date(today.getFullYear()+1, m-1, d)
+  return Math.round((occ.getTime()-todayMs)/86_400_000)
+}
+
+function formatBirthdayDate(dateStr:string):string {
+  const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+  const [,m,d] = dateStr.split("-").map(Number)
+  return `${MONTHS[m-1]} ${d}`
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CalendarPage() {
@@ -83,11 +129,21 @@ export default function CalendarPage() {
   // Mobile agenda: selected date for jumping (null = show from today)
   const [agendaAnchor, setAgendaAnchor] = useState<Date>(today)
 
+  const [birthdays, setBirthdays] = useState<BirthdayRow[]>([])
+  const [selectedBirthday, setSelectedBirthday] = useState<BirthdayRow|null>(null)
+
   const supabase  = useRef(createClient()).current
   const agendaRef = useRef<HTMLDivElement>(null)
 
   const { year, month } = ym
   const weeks = useMemo(() => buildCalendarGrid(year, month), [year, month])
+
+  const birthdayEvents = useMemo(():CalEvent[] => {
+    if (!birthdays.length) return []
+    const rangeStart = new Date(today.getFullYear()-1,0,1)
+    const rangeEnd = new Date(today.getFullYear()+2,11,31)
+    return birthdayOccurrencesInRange(birthdays, rangeStart, rangeEnd)
+  }, [birthdays, today])
 
   // ── Data fetching ───────────────────────────────────────────────────────────
 
@@ -121,6 +177,10 @@ export default function CalendarPage() {
         return eEnd >= gs
       }),
     )
+
+    const { data: bdData } = await supabase.from("birthdays").select("id,name,date,type,color")
+    setBirthdays(bdData ?? [])
+
     setLoading(false)
   }, [year, month, supabase, today])
 
@@ -169,6 +229,12 @@ export default function CalendarPage() {
     setTimeout(() => setSelectedEvent(null), 300)
   }
 
+  function openBirthdayDetail(eventId:string) {
+    const rowId = eventId.slice(BIRTHDAY_PREFIX.length).split("|")[0]
+    const bd = birthdays.find(b=>b.id===rowId)
+    if (bd) setSelectedBirthday(bd)
+  }
+
   // ── Navigation ──────────────────────────────────────────────────────────────
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -210,10 +276,11 @@ export default function CalendarPage() {
   // Build (date, events[]) groups for the next AGENDA_DAYS days from agendaAnchor
   const agendaGroups = useMemo(() => {
     const groups: { date: Date; dateStr: string; events: CalEvent[] }[] = []
+    const allEvents = [...events, ...birthdayEvents]
     for (let i = 0; i < AGENDA_DAYS; i++) {
       const d = addDays(agendaAnchor, i)
       const ds = toDateStr(d)
-      const dayEvents = events.filter((e) => {
+      const dayEvents = allEvents.filter((e) => {
         const start = startOfDay(new Date(e.start_at))
         const end   = e.end_at ? startOfDay(new Date(e.end_at)) : start
         return start <= d && end >= d
@@ -223,7 +290,7 @@ export default function CalendarPage() {
       }
     }
     return groups
-  }, [events, agendaAnchor, today])
+  }, [events, birthdayEvents, agendaAnchor, today])
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -300,7 +367,7 @@ export default function CalendarPage() {
         {/* Week rows */}
         <div className="flex flex-col flex-1 min-h-0">
           {weeks.map((week, wi) => {
-            const laid = layoutWeekEvents(events, week)
+            const laid = layoutWeekEvents([...events, ...birthdayEvents], week)
             const trackCount = laid.reduce((m, e) => Math.max(m, e.track + 1), 0)
             const minRowH = Math.max(72, DAY_H + trackCount * TRACK_H + 6)
 
@@ -337,15 +404,19 @@ export default function CalendarPage() {
                   const bg = event.color || DEFAULT_COLOR
                   const fg = chipTextColor(bg)
                   const isSpanning = endCol > startCol
+                  const isBirthday = event.id.startsWith(BIRTHDAY_PREFIX)
+                  const daysAway = isBirthday ? Math.round((startOfDay(new Date(event.start_at)).getTime()-today.getTime())/86_400_000) : 0
+                  const truncatedTitle = event.title + (isBirthday && daysAway >= 1 && daysAway <= 7 ? ` · ${daysAway}d` : "") + (isBirthday && daysAway === 0 ? " 🎉" : "")
                   return (
                     <div key={`${event.id}-w${wi}`} title={event.title}
-                      onClick={() => openEvent(event)}
+                      onClick={() => isBirthday ? openBirthdayDetail(event.id) : openEvent(event)}
                       className={cn(
                         "absolute z-10 flex items-center overflow-hidden",
                         "whitespace-nowrap cursor-pointer select-none",
                         "text-base font-medium leading-none",
                         "hover:brightness-110 hover:shadow-sm transition-[filter,box-shadow]",
                         isSpanning ? "rounded-full px-2" : "rounded px-1.5",
+                        isBirthday && daysAway === 0 && "font-bold",
                       )}
                       style={{
                         backgroundColor: bg, color: fg,
@@ -355,7 +426,7 @@ export default function CalendarPage() {
                         width: `calc(${((endCol - startCol + 1) / 7) * 100}% - 4px)`,
                       }}
                     >
-                      <span className="truncate">{event.title}</span>
+                      <span className="truncate">{truncatedTitle}</span>
                     </div>
                   )
                 })}
@@ -478,26 +549,37 @@ export default function CalendarPage() {
                       <span className="text-lg text-muted-foreground italic">No events</span>
                     </div>
                   ) : (
-                    dayEvents.map((ev) => (
-                      <button
-                        key={ev.id}
-                        onClick={() => openEvent(ev)}
-                        className="w-full flex items-start gap-3 px-4 py-3 border-b last:border-b-0 hover:bg-muted/30 transition-colors text-left min-h-[44px]"
-                      >
-                        {/* Colour stripe */}
-                        <div
-                          className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: ev.color ?? DEFAULT_COLOR }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xl font-medium leading-snug">{ev.title}</p>
-                          <p className="text-lg text-muted-foreground mt-0.5">
-                            {formatTime(ev.start_at)}
-                            {ev.end_at && <> – {formatTime(ev.end_at)}</>}
-                          </p>
-                        </div>
-                      </button>
-                    ))
+                    dayEvents.map((ev) => {
+                      const isBirthday = ev.id.startsWith(BIRTHDAY_PREFIX)
+                      const bdDaysAway = isBirthday ? Math.round((startOfDay(new Date(ev.start_at)).getTime()-today.getTime())/86_400_000) : 0
+                      return (
+                        <button
+                          key={ev.id}
+                          onClick={() => isBirthday ? openBirthdayDetail(ev.id) : openEvent(ev)}
+                          className="w-full flex items-start gap-3 px-4 py-3 border-b last:border-b-0 hover:bg-muted/30 transition-colors text-left min-h-[44px]"
+                        >
+                          {/* Colour stripe */}
+                          <div
+                            className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: ev.color ?? DEFAULT_COLOR }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xl font-medium leading-snug">{ev.title}</p>
+                            <p className="text-lg text-muted-foreground mt-0.5">
+                              {isBirthday
+                                ? (bdDaysAway === 0 ? "Today! 🎉" : `in ${bdDaysAway} days`)
+                                : (
+                                  <>
+                                    {formatTime(ev.start_at)}
+                                    {ev.end_at && <> – {formatTime(ev.end_at)}</>}
+                                  </>
+                                )
+                              }
+                            </p>
+                          </div>
+                        </button>
+                      )
+                    })
                   )}
                 </div>
               )
@@ -510,6 +592,26 @@ export default function CalendarPage() {
 
       {/* Event detail / edit sheet */}
       <EventSheet event={selectedEvent} open={sheetOpen} onClose={closeSheet} onSaved={fetchEvents} />
+
+      {/* Birthday detail dialog */}
+      {selectedBirthday && (
+        <Dialog open={!!selectedBirthday} onOpenChange={o=>!o&&setSelectedBirthday(null)}>
+          <DialogContent className="max-w-xs">
+            <DialogHeader>
+              <DialogTitle>{selectedBirthday.type==="birthday"?"🎂":"❤️"} {selectedBirthday.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                {selectedBirthday.type==="birthday"?"Birthday":"Anniversary"} · {formatBirthdayDate(selectedBirthday.date)}
+              </p>
+              {(()=>{
+                const days=daysUntilBirthday(selectedBirthday.date,today)
+                return <p className="text-base font-semibold">{days===0?"🎉 Today!":days===1?"Tomorrow!":`in ${days} days`}</p>
+              })()}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }

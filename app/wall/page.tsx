@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { X, CheckCircle2, Circle } from "lucide-react"
 import { toast } from "sonner"
@@ -15,6 +15,7 @@ const WALL_TABLES = [
   { table: "chores" },
   { table: "meals" },
   { table: "messages" },
+  { table: "birthdays" },
 ] as const
 
 // ── Local types ────────────────────────────────────────────────────────────────
@@ -60,6 +61,8 @@ interface WallMessage {
   created_at: string
   dismissed_at: string | null
 }
+
+interface BirthdayRow { id:string; name:string; date:string; type:"birthday"|"anniversary"; color:string }
 
 interface Weather {
   temp: number          // °C
@@ -178,6 +181,7 @@ export default function WallPage() {
 
   // Data
   const [events, setEvents]           = useState<CalEvent[]>([])
+  const [birthdays, setBirthdays]     = useState<BirthdayRow[]>([])
   const [members, setMembers]         = useState<Member[]>([])
   const [chores, setChores]           = useState<Chore[]>([])
   const [dinnerToday, setDinnerToday]         = useState<Meal | null>(null)
@@ -204,7 +208,7 @@ export default function WallPage() {
     const todayStr    = toDateStr(today)
     const tomorrowStr = toDateStr(tomorrow)
 
-    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes] = await Promise.all([
+    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes, bdRes] = await Promise.all([
       supabase
         .from("events")
         .select("id, title, start_at, end_at, color")
@@ -228,9 +232,13 @@ export default function WallPage() {
         .select("id, from_member_id, to_member_id, body, created_at, dismissed_at")
         .is("dismissed_at", null)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("birthdays")
+        .select("id, name, date, type, color"),
     ])
 
     setEvents(eventsRes.data ?? [])
+    setBirthdays(bdRes.data ?? [])
     const memberList = membersRes.data ?? []
     setMembers(memberList)
     // Initialise wall message filter to all members on first load
@@ -296,6 +304,19 @@ export default function WallPage() {
   // ── Derived ────────────────────────────────────────────────────────────────
 
   const memberMap = new Map(members.map((m) => [m.id, m]))
+
+  const upcomingBirthdays = useMemo(() => {
+    const todayMs = (() => { const d=new Date(); d.setHours(0,0,0,0); return d.getTime() })()
+    return birthdays
+      .map(b => {
+        const [,m,d2] = b.date.split("-").map(Number)
+        let occ = new Date(new Date().getFullYear(), m-1, d2)
+        if (occ.getTime() < todayMs) occ = new Date(new Date().getFullYear()+1, m-1, d2)
+        return { ...b, daysAway: Math.round((occ.getTime()-todayMs)/86_400_000) }
+      })
+      .filter(b => b.daysAway <= 7)
+      .sort((a,b) => a.daysAway - b.daysAway)
+  }, [birthdays])
 
   // Group chores by assigned member (preserve insertion order)
   const choreGroupMap = new Map<string, Chore[]>()
@@ -413,6 +434,21 @@ export default function WallPage() {
               ))
             })()}
           </div>
+
+          {upcomingBirthdays.length > 0 && (
+            <div className="shrink-0 border-t bg-muted/20 px-6 py-3 space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Coming up</p>
+              {upcomingBirthdays.map(b => (
+                <div key={b.id} className="flex items-center gap-2">
+                  <span className="text-lg leading-none">{b.type==="birthday"?"🎂":"❤️"}</span>
+                  <span className="text-base font-medium flex-1">{b.name}</span>
+                  <span className="text-sm text-muted-foreground shrink-0">
+                    {b.daysAway===0?"Today! 🎉":`${b.daysAway} day${b.daysAway!==1?"s":""}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
         </ErrorBoundary>
 

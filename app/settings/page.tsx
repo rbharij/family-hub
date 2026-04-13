@@ -44,6 +44,13 @@ function fmtHour(h: number) {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface BdEntry { id: string; name: string; date: string; type: "birthday"|"anniversary"; color: string }
+interface BdForm  { name: string; month: number; day: number; type: "birthday"|"anniversary"; color: string }
+const defaultBdForm = (): BdForm => ({ name:"", month:1, day:1, type:"birthday", color:"#534AB7" })
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+function formatBdDate(dateStr:string):string { const [,m,d]=dateStr.split("-").map(Number); return `${MONTH_NAMES[m-1]} ${d}` }
+function formToDateStr(month:number,day:number):string { return `2000-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}` }
+
 interface Member {
   id: string
   name: string
@@ -87,6 +94,16 @@ export default function SettingsPage() {
   const [showNewEmoji, setShowNewEmoji] = useState(false)
   const [deletingId, setDeletingId]   = useState<string | null>(null)
   const [savingMember, setSavingMember] = useState(false)
+
+  // Birthdays & Anniversaries
+  const [bdEntries, setBdEntries]     = useState<BdEntry[]>([])
+  const [bdLoading, setBdLoading]     = useState(true)
+  const [bdAddingNew, setBdAddingNew] = useState(false)
+  const [bdNewForm, setBdNewForm]     = useState<BdForm>(defaultBdForm())
+  const [bdEditingId, setBdEditingId] = useState<string | null>(null)
+  const [bdEditForm, setBdEditForm]   = useState<BdForm>(defaultBdForm())
+  const [bdDeletingId, setBdDeletingId] = useState<string | null>(null)
+  const [bdSaving, setBdSaving]       = useState(false)
 
   // Theme hours
   const [dFrom, setDFrom] = useState(darkFromHour)
@@ -208,6 +225,73 @@ export default function SettingsPage() {
     setAddingNew(false)
     setShowNewEmoji(false)
     toast.success("Member added")
+  }
+
+  // ── Birthdays & Anniversaries ─────────────────────────────────────────────
+
+  const fetchBirthdays = useCallback(async () => {
+    const { data } = await supabase
+      .from("birthdays")
+      .select("id, name, date, type, color")
+      .order("date")
+    setBdEntries(data ?? [])
+    setBdLoading(false)
+  }, [supabase])
+
+  useEffect(() => { fetchBirthdays() }, [fetchBirthdays])
+
+  async function addBirthday() {
+    if (!bdNewForm.name.trim()) return
+    setBdSaving(true)
+    const { data, error } = await supabase
+      .from("birthdays")
+      .insert({
+        name: bdNewForm.name.trim(),
+        date: formToDateStr(bdNewForm.month, bdNewForm.day),
+        type: bdNewForm.type,
+        color: bdNewForm.color,
+      })
+      .select()
+      .single()
+    setBdSaving(false)
+    if (error || !data) { toast.error("Failed to add entry"); return }
+    setBdEntries((prev) => [...prev, data as BdEntry])
+    setBdNewForm(defaultBdForm())
+    setBdAddingNew(false)
+    toast.success("Added")
+  }
+
+  async function saveBirthdayEdit() {
+    if (!bdEditingId || !bdEditForm.name.trim()) return
+    setBdSaving(true)
+    const { error } = await supabase
+      .from("birthdays")
+      .update({
+        name: bdEditForm.name.trim(),
+        date: formToDateStr(bdEditForm.month, bdEditForm.day),
+        type: bdEditForm.type,
+        color: bdEditForm.color,
+      })
+      .eq("id", bdEditingId)
+    setBdSaving(false)
+    if (error) { toast.error("Failed to save"); return }
+    setBdEntries((prev) =>
+      prev.map((b) =>
+        b.id === bdEditingId
+          ? { ...b, name: bdEditForm.name.trim(), date: formToDateStr(bdEditForm.month, bdEditForm.day), type: bdEditForm.type, color: bdEditForm.color }
+          : b,
+      ),
+    )
+    setBdEditingId(null)
+    toast.success("Updated")
+  }
+
+  async function deleteBirthday() {
+    if (!bdDeletingId) return
+    await supabase.from("birthdays").delete().eq("id", bdDeletingId)
+    setBdEntries((prev) => prev.filter((b) => b.id !== bdDeletingId))
+    setBdDeletingId(null)
+    toast.success("Removed")
   }
 
   // ── Theme hours ───────────────────────────────────────────────────────────
@@ -415,6 +499,85 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* ── Birthdays & Anniversaries ────────────────────────────────────── */}
+      <section className="space-y-4">
+        <SectionHeader icon={<span>🎂</span>} title="Birthdays & Anniversaries" />
+
+        {bdLoading ? (
+          <div className="space-y-3">
+            {[1, 2].map((i) => (
+              <Skeleton key={i} className="h-14 rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {bdEntries.map((b) =>
+              bdEditingId === b.id ? (
+                <BdEditRow
+                  key={b.id}
+                  form={bdEditForm}
+                  onChange={setBdEditForm}
+                  onSave={saveBirthdayEdit}
+                  onCancel={() => setBdEditingId(null)}
+                  saving={bdSaving}
+                />
+              ) : (
+                <BdEntryRow
+                  key={b.id}
+                  entry={b}
+                  onEdit={() => {
+                    const [,m,d] = b.date.split("-").map(Number)
+                    setBdEditingId(b.id)
+                    setBdEditForm({ name: b.name, month: m, day: d, type: b.type, color: b.color })
+                  }}
+                  onDelete={() => setBdDeletingId(b.id)}
+                />
+              ),
+            )}
+
+            {bdAddingNew ? (
+              <BdEditRow
+                form={bdNewForm}
+                onChange={setBdNewForm}
+                onSave={addBirthday}
+                onCancel={() => { setBdAddingNew(false); setBdNewForm(defaultBdForm()) }}
+                saving={bdSaving}
+                isNew
+              />
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2 mt-1"
+                onClick={() => setBdAddingNew(true)}
+              >
+                <Plus className="h-4 w-4" /> Add birthday or anniversary
+              </Button>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Birthday delete confirmation */}
+      <Dialog open={!!bdDeletingId} onOpenChange={(o) => !o && setBdDeletingId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove entry?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {bdEntries.find((b) => b.id === bdDeletingId)?.name} will be removed.
+          </p>
+          <DialogFooter className="gap-2">
+            <DialogClose>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
+            <Button variant="destructive" size="sm" onClick={deleteBirthday}>
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete confirmation */}
       <Dialog open={!!deletingId} onOpenChange={(o) => !o && setDeletingId(null)}>
         <DialogContent className="max-w-sm">
@@ -487,6 +650,155 @@ function MemberRow({
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
+      </div>
+    </div>
+  )
+}
+
+function BdEntryRow({
+  entry,
+  onEdit,
+  onDelete,
+}: {
+  entry: BdEntry
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 border rounded-xl bg-background hover:bg-muted/30 transition-colors">
+      <span className="text-2xl leading-none shrink-0">{entry.type === "birthday" ? "🎂" : "❤️"}</span>
+      <div
+        className="w-3 h-3 rounded-full shrink-0"
+        style={{ backgroundColor: entry.color }}
+      />
+      <span className="font-medium flex-1 truncate">{entry.name}</span>
+      <span className="text-sm text-muted-foreground shrink-0">{formatBdDate(entry.date)}</span>
+      <div className="flex gap-1 shrink-0">
+        <button
+          onClick={onEdit}
+          className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          title="Edit"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button
+          onClick={onDelete}
+          className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          title="Remove"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function BdEditRow({
+  form,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  isNew = false,
+}: {
+  form: BdForm
+  onChange: (f: BdForm) => void
+  onSave: () => void
+  onCancel: () => void
+  saving: boolean
+  isNew?: boolean
+}) {
+  const DAY_COUNTS = [31,29,31,30,31,30,31,31,30,31,30,31]
+  const daysInMonth = DAY_COUNTS[form.month - 1] ?? 31
+  return (
+    <div className="border rounded-xl p-3 space-y-3 bg-muted/20">
+      {/* Name + cancel */}
+      <div className="flex items-center gap-2">
+        <Input
+          value={form.name}
+          onChange={(e) => onChange({ ...form, name: e.target.value })}
+          onKeyDown={(e) => e.key === "Enter" && onSave()}
+          placeholder="Name"
+          className="flex-1 h-9"
+          autoFocus={isNew}
+        />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-9 w-9 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted transition-colors shrink-0"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Month + Day selects */}
+      <div className="flex gap-2">
+        <select
+          value={form.month}
+          onChange={(e) => onChange({ ...form, month: Number(e.target.value), day: Math.min(form.day, DAY_COUNTS[Number(e.target.value)-1] ?? 31) })}
+          className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring flex-1"
+        >
+          {MONTH_NAMES.map((mn, idx) => (
+            <option key={idx+1} value={idx+1}>{mn}</option>
+          ))}
+        </select>
+        <select
+          value={form.day}
+          onChange={(e) => onChange({ ...form, day: Number(e.target.value) })}
+          className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-20"
+        >
+          {Array.from({ length: daysInMonth }, (_, i) => i+1).map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Type toggle */}
+      <div className="flex gap-2">
+        {(["birthday","anniversary"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onChange({ ...form, type: t })}
+            className={cn(
+              "flex-1 h-9 rounded-lg border text-sm font-medium transition-colors",
+              form.type === t
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-input hover:bg-muted",
+            )}
+          >
+            {t === "birthday" ? "🎂 Birthday" : "❤️ Anniversary"}
+          </button>
+        ))}
+      </div>
+
+      {/* Colour swatches + save */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap flex-1">
+          {COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onChange({ ...form, color: c })}
+              className={cn(
+                "w-5 h-5 rounded-full border-2 transition-transform hover:scale-110",
+                form.color === c ? "border-foreground scale-110" : "border-transparent",
+              )}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
+        <Button
+          size="sm"
+          className="gap-1.5 shrink-0"
+          onClick={onSave}
+          disabled={saving || !form.name.trim()}
+        >
+          {saving
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <Check className="h-3.5 w-3.5" />}
+          {isNew ? "Add" : "Save"}
+        </Button>
       </div>
     </div>
   )
