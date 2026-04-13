@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Pencil, Trash2, X, Loader2, Plus, MapPin, AlignLeft, Clock } from "lucide-react"
 import {
   Sheet,
@@ -35,12 +35,21 @@ interface EventSheetProps {
   onClose: () => void
 }
 
-// ── Colour swatches ────────────────────────────────────────────────────────────
+// ── Colour / Category config ───────────────────────────────────────────────────
 
-const COLORS = [
-  "#534AB7", "#3b82f6", "#10b981", "#f59e0b",
-  "#ef4444", "#ec4899", "#8b5cf6", "#14b8a6",
+const COLOR_CATEGORIES: { color: string; defaultName: string }[] = [
+  { color: "#534AB7", defaultName: "School" },
+  { color: "#3b82f6", defaultName: "Work" },
+  { color: "#10b981", defaultName: "Sport" },
+  { color: "#f59e0b", defaultName: "Appointments" },
+  { color: "#ef4444", defaultName: "Important" },
+  { color: "#ec4899", defaultName: "Family" },
+  { color: "#8b5cf6", defaultName: "Social" },
+  { color: "#14b8a6", defaultName: "Other" },
 ]
+
+const PRESET_COLORS = COLOR_CATEGORIES.map((c) => c.color)
+const SETTINGS_KEY  = "color_categories"
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -154,14 +163,59 @@ function formToPayload(form: EventForm) {
 
 export function EventSheet({ event, open, onClose }: EventSheetProps) {
   const isCreate = event === null
-  const [mode, setMode] = useState<SheetMode>(isCreate ? "create" : "view")
-  const [form, setForm] = useState<EventForm>(isCreate ? emptyForm() : eventToForm(event!))
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [mode, setMode]           = useState<SheetMode>(isCreate ? "create" : "view")
+  const [form, setForm]           = useState<EventForm>(isCreate ? emptyForm() : eventToForm(event!))
+  const [saving, setSaving]       = useState(false)
+  const [deleting, setDeleting]   = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]         = useState<string | null>(null)
+
+  // Category names: color hex → label
+  const [categoryNames, setCategoryNames] = useState<Record<string, string>>({})
+  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const supabase = createClient()
+
+  // ── Load category names from app_settings ─────────────────────────────────
+
+  useEffect(() => {
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", SETTINGS_KEY)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.value && typeof data.value === "object") {
+          setCategoryNames(data.value as Record<string, string>)
+        }
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Save category names (debounced) ───────────────────────────────────────
+
+  function saveCategoryNames(names: Record<string, string>) {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current)
+    saveTimeout.current = setTimeout(async () => {
+      await supabase
+        .from("app_settings")
+        .upsert({ key: SETTINGS_KEY, value: names }, { onConflict: "key" })
+    }, 600)
+  }
+
+  function updateCategoryName(color: string, name: string) {
+    const updated = { ...categoryNames, [color]: name }
+    setCategoryNames(updated)
+    saveCategoryNames(updated)
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  function getCategoryName(color: string | null): string | null {
+    if (!color) return null
+    const preset = COLOR_CATEGORIES.find((c) => c.color === color)
+    return categoryNames[color] ?? preset?.defaultName ?? null
+  }
 
   // Reset when the sheet opens/event changes
   useEffect(() => {
@@ -292,8 +346,9 @@ export function EventSheet({ event, open, onClose }: EventSheetProps) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const isEditing = mode === "edit" || mode === "create"
+  const isEditing  = mode === "edit" || mode === "create"
   const sheetTitle = mode === "create" ? "New Event" : mode === "edit" ? "Edit Event" : (event?.title ?? "")
+  const eventCategory = getCategoryName(event?.color ?? null)
 
   return (
     <>
@@ -332,15 +387,18 @@ export function EventSheet({ event, open, onClose }: EventSheetProps) {
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
 
-            {/* View mode: colour + sync badge */}
+            {/* View mode: colour + category + sync badge */}
             {!isEditing && event && (
               <div className="flex items-center gap-2">
                 <span
                   className="inline-block w-3 h-3 rounded-full shrink-0"
                   style={{ backgroundColor: event.color ?? "#534AB7" }}
                 />
+                <span className="text-sm font-medium" style={{ color: event.color ?? undefined }}>
+                  {eventCategory ?? "Uncategorised"}
+                </span>
                 <span className="text-xs text-muted-foreground">
-                  {event.google_event_id ? "Synced from Google Calendar" : "Manual event"}
+                  · {event.google_event_id ? "Synced from Google Calendar" : "Manual event"}
                 </span>
               </div>
             )}
@@ -489,45 +547,75 @@ export function EventSheet({ event, open, onClose }: EventSheetProps) {
               </div>
             ) : null}
 
-            {/* ── Colour ───────────────────────────────────────────────────── */}
+            {/* ── Colour & Category ─────────────────────────────────────────── */}
             {isEditing && (
               <div className="space-y-2">
-                <Label>Colour</Label>
-                <div className="flex flex-wrap gap-2 items-center">
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={cn(
-                        "w-7 h-7 rounded-full border-2 transition-transform hover:scale-110",
-                        form.color === c ? "border-foreground scale-110" : "border-transparent",
-                      )}
-                      style={{ backgroundColor: c }}
-                      onClick={() => patch({ color: c })}
-                      aria-label={c}
-                    />
-                  ))}
-                  {/* Custom hex */}
+                <div className="flex items-center justify-between">
+                  <Label>Colour &amp; Category</Label>
+                  <span className="text-xs text-muted-foreground">Click a colour to select · edit name to rename</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {COLOR_CATEGORIES.map(({ color, defaultName }) => {
+                    const name      = categoryNames[color] ?? defaultName
+                    const isSelected = form.color === color
+                    return (
+                      <div
+                        key={color}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border-2 px-2.5 py-2 transition-all",
+                          isSelected
+                            ? "border-foreground bg-muted/60 shadow-sm"
+                            : "border-transparent bg-muted/30 hover:border-muted-foreground/30 cursor-pointer",
+                        )}
+                        onClick={() => patch({ color })}
+                      >
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full transition-all",
+                            isSelected ? "w-5 h-5" : "w-4 h-4",
+                          )}
+                          style={{ backgroundColor: color }}
+                        />
+                        <input
+                          type="text"
+                          value={name}
+                          onChange={(e) => updateCategoryName(color, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 min-w-0 text-sm bg-transparent outline-none border-b border-transparent focus:border-muted-foreground/40 transition-colors"
+                          placeholder={defaultName}
+                          maxLength={24}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Custom colour */}
+                <div className="flex items-center gap-2 mt-1">
                   <div className="relative flex items-center">
                     <input
                       type="color"
                       value={form.color}
                       onChange={(e) => patch({ color: e.target.value })}
-                      className="absolute inset-0 opacity-0 w-7 h-7 cursor-pointer"
+                      className="absolute inset-0 opacity-0 w-8 h-8 cursor-pointer"
                       title="Custom colour"
                     />
                     <span
                       className={cn(
-                        "w-7 h-7 rounded-full border-2 flex items-center justify-center text-[9px] font-bold",
-                        !COLORS.includes(form.color)
+                        "w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-bold transition-all",
+                        !PRESET_COLORS.includes(form.color)
                           ? "border-foreground scale-110"
                           : "border-dashed border-muted-foreground",
                       )}
-                      style={{ backgroundColor: !COLORS.includes(form.color) ? form.color : "transparent" }}
+                      style={{ backgroundColor: !PRESET_COLORS.includes(form.color) ? form.color : "transparent" }}
                     >
-                      {COLORS.includes(form.color) ? "+" : ""}
+                      {PRESET_COLORS.includes(form.color) ? "+" : ""}
                     </span>
                   </div>
+                  <span className="text-xs text-muted-foreground">Custom colour</span>
+                  {!PRESET_COLORS.includes(form.color) && (
+                    <span className="text-xs font-mono text-muted-foreground">{form.color}</span>
+                  )}
                 </div>
               </div>
             )}
