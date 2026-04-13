@@ -15,7 +15,6 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger,
 } from "@/components/ui/select"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -59,13 +58,17 @@ export default function MessagesPage() {
   const [loading, setLoading]     = useState(true)
   const [myId, setMyId]           = useState<string>("")
   const [composeOpen, setComposeOpen] = useState(false)
+  const [filterIds, setFilterIds] = useState<Set<string>>(new Set())
+  const [showDismissed, setShowDismissed] = useState(false)
 
-  // Load members and set persisted "me" selection
+  // Load members, set persisted "me" selection, and initialise all filters as selected
   useEffect(() => {
     supabase.from("family_members").select("id, name, avatar_emoji, color").order("created_at")
       .then(({ data }) => {
         const list = data ?? []
         setMembers(list)
+        // All members selected by default
+        setFilterIds(new Set(list.map((m) => m.id)))
         const saved = localStorage.getItem("messages-my-member-id")
         if (saved && list.some((m) => m.id === saved)) {
           setMyId(saved)
@@ -100,12 +103,36 @@ export default function MessagesPage() {
     }
   }
 
-  function selectMe(id: string) {
-    setMyId(id)
-    localStorage.setItem("messages-my-member-id", id)
+  function toggleFilter(id: string) {
+    setFilterIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
+  // ── Derived ────────────────────────────────────────────────────────────────
+
   const memberMap = new Map(members.map((m) => [m.id, m]))
+
+  // If no filters selected, show all; otherwise filter by selected recipients
+  const filtered = filterIds.size === 0
+    ? messages
+    : messages.filter((m) => filterIds.has(m.to_member_id))
+
+  const active    = filtered.filter((m) => !m.dismissed_at)
+  const dismissed = filtered.filter((m) => !!m.dismissed_at)
+
+  // Group active by recipient
+  const activeGroups = new Map<string, Message[]>()
+  for (const msg of active) {
+    const g = activeGroups.get(msg.to_member_id) ?? []
+    g.push(msg)
+    activeGroups.set(msg.to_member_id, g)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-full p-3 lg:p-4 gap-3">
@@ -118,96 +145,95 @@ export default function MessagesPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="for-me" className="flex flex-col flex-1 min-h-0">
-        <TabsList variant="line"
-          className="w-full justify-start border-b rounded-none px-0 h-auto pb-0 shrink-0 gap-0">
-          <TabsTrigger value="for-me"
-            className="rounded-none px-4 py-2.5 text-sm border-b-2 -mb-px">
-            For Me
-          </TabsTrigger>
-          <TabsTrigger value="all"
-            className="rounded-none px-4 py-2.5 text-sm border-b-2 -mb-px">
-            All Messages
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── For Me ─────────────────────────────────────────────────────── */}
-        <TabsContent value="for-me" className="flex-1 min-h-0 overflow-y-auto mt-0 pt-3">
-          {/* Member selector */}
-          <div className="flex items-center gap-2 mb-4 px-1">
-            <Label className="text-sm text-muted-foreground shrink-0">Viewing as:</Label>
-            <Select value={myId} onValueChange={(v) => v && selectMe(v)}>
-              <SelectTrigger className="w-48 h-8 text-sm">
-                {myId
-                  ? (() => {
-                      const m = memberMap.get(myId)
-                      return m
-                        ? <span>{m.avatar_emoji} {m.name}</span>
-                        : <span className="text-muted-foreground">Select…</span>
-                    })()
-                  : <span className="text-muted-foreground">Select…</span>}
-              </SelectTrigger>
-              <SelectContent>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.avatar_emoji} {m.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {loading ? <LoadingSkeletons /> : (
-            myId
-              ? <ForMePanel
-                  myId={myId}
-                  messages={messages}
-                  memberMap={memberMap}
-                  onDismiss={dismiss}
-                />
-              : <EmptyState icon="👤" text="Select a family member above to see your messages." />
-          )}
-        </TabsContent>
-
-        {/* ── All Messages ────────────────────────────────────────────────── */}
-        <TabsContent value="all" className="flex-1 min-h-0 overflow-y-auto mt-0 pt-3">
-          {loading ? <LoadingSkeletons /> : (() => {
-            const active = messages.filter((m) => !m.dismissed_at)
-            if (active.length === 0)
-              return <EmptyState icon="💬" text="No active messages — all caught up!" />
-
-            // Group by recipient
-            const groups = new Map<string, Message[]>()
-            for (const msg of active) {
-              const g = groups.get(msg.to_member_id) ?? []
-              g.push(msg)
-              groups.set(msg.to_member_id, g)
-            }
+      {/* Member filter buttons */}
+      {members.length > 0 && (
+        <div className="flex flex-wrap gap-2 shrink-0">
+          {members.map((m) => {
+            const selected = filterIds.has(m.id)
             return (
-              <div className="space-y-6 pb-4">
-                {Array.from(groups.entries()).map(([toId, msgs]) => {
-                  const recipient = memberMap.get(toId)
-                  return (
-                    <div key={toId}>
-                      <MemberChip member={recipient} className="mb-2" />
-                      <div className="space-y-2">
-                        {msgs.map((msg) => (
-                          <MessageCard
-                            key={msg.id}
-                            msg={msg}
-                            memberMap={memberMap}
-                            onDismiss={dismiss}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              <button
+                key={m.id}
+                onClick={() => toggleFilter(m.id)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold transition-all border-2",
+                  !selected && "opacity-40",
+                )}
+                style={{
+                  backgroundColor: selected && m.color ? `${m.color}20` : undefined,
+                  color: selected && m.color ? m.color : undefined,
+                  borderColor: selected && m.color ? m.color : "transparent",
+                }}
+              >
+                {m.avatar_emoji && <span>{m.avatar_emoji}</span>}
+                {m.name}
+              </button>
             )
-          })()}
-        </TabsContent>
-      </Tabs>
+          })}
+        </div>
+      )}
+
+      {/* Messages list */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {loading ? (
+          <LoadingSkeletons />
+        ) : active.length === 0 && dismissed.length === 0 ? (
+          <EmptyState icon="💬" text="No messages — all caught up!" />
+        ) : (
+          <div className="space-y-6 pb-4">
+            {/* Active messages grouped by recipient */}
+            {active.length === 0 ? (
+              <EmptyState icon="✅" text="All caught up! No active messages." />
+            ) : (
+              Array.from(activeGroups.entries()).map(([toId, msgs]) => {
+                const recipient = memberMap.get(toId)
+                return (
+                  <div key={toId}>
+                    <MemberChip member={recipient} className="mb-2" />
+                    <div className="space-y-2">
+                      {msgs.map((msg) => (
+                        <MessageCard
+                          key={msg.id}
+                          msg={msg}
+                          memberMap={memberMap}
+                          onDismiss={dismiss}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })
+            )}
+
+            {/* Collapsible dismissed section */}
+            {dismissed.length > 0 && (
+              <div>
+                <button
+                  onClick={() => setShowDismissed((v) => !v)}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
+                >
+                  {showDismissed
+                    ? <ChevronUp className="h-4 w-4" />
+                    : <ChevronDown className="h-4 w-4" />}
+                  {dismissed.length} dismissed message{dismissed.length !== 1 ? "s" : ""}
+                </button>
+                {showDismissed && (
+                  <div className="space-y-2 opacity-60">
+                    {dismissed.map((msg) => (
+                      <MessageCard
+                        key={msg.id}
+                        msg={msg}
+                        memberMap={memberMap}
+                        onDismiss={dismiss}
+                        dismissed
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Compose dialog */}
       <ComposeDialog
@@ -217,60 +243,6 @@ export default function MessagesPage() {
         myId={myId}
         onSent={fetchMessages}
       />
-    </div>
-  )
-}
-
-// ── For Me Panel ───────────────────────────────────────────────────────────────
-
-function ForMePanel({
-  myId, messages, memberMap, onDismiss,
-}: {
-  myId: string
-  messages: Message[]
-  memberMap: Map<string, Member>
-  onDismiss: (id: string) => void
-}) {
-  const [showDismissed, setShowDismissed] = useState(false)
-  const mine = messages.filter((m) => m.to_member_id === myId)
-  const unread    = mine.filter((m) => !m.dismissed_at)
-  const dismissed = mine.filter((m) => !!m.dismissed_at)
-
-  if (mine.length === 0)
-    return <EmptyState icon="📬" text="No messages for you yet." />
-
-  return (
-    <div className="space-y-6 pb-4">
-      {unread.length === 0 ? (
-        <EmptyState icon="✅" text="All caught up! No unread messages." />
-      ) : (
-        <div className="space-y-2">
-          {unread.map((msg) => (
-            <MessageCard key={msg.id} msg={msg} memberMap={memberMap} onDismiss={onDismiss} />
-          ))}
-        </div>
-      )}
-
-      {dismissed.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowDismissed((v) => !v)}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
-          >
-            {showDismissed
-              ? <ChevronUp className="h-4 w-4" />
-              : <ChevronDown className="h-4 w-4" />}
-            {dismissed.length} dismissed message{dismissed.length !== 1 ? "s" : ""}
-          </button>
-          {showDismissed && (
-            <div className="space-y-2 opacity-60">
-              {dismissed.map((msg) => (
-                <MessageCard key={msg.id} msg={msg} memberMap={memberMap} onDismiss={onDismiss} dismissed />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

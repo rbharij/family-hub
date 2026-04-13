@@ -185,6 +185,7 @@ export default function WallPage() {
   const [dinnerTomorrow, setDinnerTomorrow]   = useState<Meal | null>(null)
   const [lunchboxesTomorrow, setLunchboxesTomorrow] = useState<Meal[]>([])
   const [wallMessages, setWallMessages]       = useState<WallMessage[]>([])
+  const [wallMsgFilter, setWallMsgFilter]     = useState<Set<string>>(new Set())
 
   // ── Clock tick ─────────────────────────────────────────────────────────────
 
@@ -230,7 +231,10 @@ export default function WallPage() {
     ])
 
     setEvents(eventsRes.data ?? [])
-    setMembers(membersRes.data ?? [])
+    const memberList = membersRes.data ?? []
+    setMembers(memberList)
+    // Initialise wall message filter to all members on first load
+    setWallMsgFilter((prev) => prev.size === 0 ? new Set(memberList.map((m) => m.id)) : prev)
     setChores(choresRes.data ?? [])
     setWallMessages(msgsRes.data ?? [])
 
@@ -268,6 +272,17 @@ export default function WallPage() {
       setChores((prev) => prev.map((c) => c.id === chore.id ? chore : c))
       toast.error("Couldn't update chore.")
     }
+  }
+
+  // ── Wall message filter ────────────────────────────────────────────────────
+
+  function toggleWallMsgFilter(id: string) {
+    setWallMsgFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   // ── Dismiss message ────────────────────────────────────────────────────────
@@ -497,24 +512,61 @@ export default function WallPage() {
         {/* ── Bottom Right: Messages ─────────────────────────────────────── */}
         <ErrorBoundary label="Messages panel">
         <section className="flex flex-col overflow-hidden">
-          <div className="shrink-0 px-6 pt-5 pb-3 border-b bg-muted/30 flex items-center gap-3">
-            <h2 className="text-[28px] font-bold leading-none flex-1">💬 Messages</h2>
-            {wallMessages.length > 0 && (
-              <span className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold min-w-[28px] h-7 px-2">
-                {wallMessages.length}
-              </span>
+          <div className="shrink-0 px-6 pt-4 pb-3 border-b bg-muted/30">
+            <div className="flex items-center gap-3 mb-3">
+              <h2 className="text-[28px] font-bold leading-none flex-1">💬 Messages</h2>
+              {wallMessages.length > 0 && (
+                <span className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold min-w-[28px] h-7 px-2">
+                  {wallMessages.length}
+                </span>
+              )}
+            </div>
+            {/* Compact member filter buttons */}
+            {members.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {members.map((m) => {
+                  const selected = wallMsgFilter.has(m.id)
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => toggleWallMsgFilter(m.id)}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold transition-all border-2",
+                        !selected && "opacity-40",
+                      )}
+                      style={{
+                        backgroundColor: selected && m.color ? `${m.color}20` : undefined,
+                        color: selected && m.color ? m.color : undefined,
+                        borderColor: selected && m.color ? m.color : "transparent",
+                      }}
+                    >
+                      {m.avatar_emoji && <span className="text-base leading-none">{m.avatar_emoji}</span>}
+                      <span className="text-sm">{m.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-            {wallMessages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                <span className="text-4xl">💬</span>
-                <p className="text-xl italic">No messages — all caught up!</p>
-              </div>
-            ) : (() => {
+            {(() => {
+              // Apply filter
+              const filtered = wallMsgFilter.size === 0
+                ? wallMessages
+                : wallMessages.filter((m) => wallMsgFilter.has(m.to_member_id))
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                    <span className="text-4xl">💬</span>
+                    <p className="text-xl italic">No messages — all caught up!</p>
+                  </div>
+                )
+              }
+
               // Group by recipient
               const groups = new Map<string, WallMessage[]>()
-              for (const msg of wallMessages) {
+              for (const msg of filtered) {
                 const g = groups.get(msg.to_member_id) ?? []
                 g.push(msg)
                 groups.set(msg.to_member_id, g)
