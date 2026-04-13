@@ -278,7 +278,7 @@ export default function CalendarPage() {
         {/* Weekday header row */}
         <div className="grid grid-cols-7 border-b bg-muted/40 shrink-0">
           {WEEKDAYS.map((d) => (
-            <div key={d} className="py-2 text-center text-xs font-medium text-muted-foreground select-none">
+            <div key={d} className="py-2 text-center text-sm font-medium text-muted-foreground select-none">
               {d}
             </div>
           ))}
@@ -319,8 +319,8 @@ export default function CalendarPage() {
                     >
                       <div className="flex justify-center items-center h-7">
                         <span className={cn(
-                          "flex items-center justify-center w-7 h-7 rounded-full",
-                          "text-xs font-medium select-none leading-none",
+                          "flex items-center justify-center w-8 h-8 rounded-full",
+                          "text-sm font-medium select-none leading-none",
                           isToday && "bg-primary text-primary-foreground font-bold",
                           !isToday && inMonth && "text-foreground",
                           !isToday && !inMonth && "text-muted-foreground",
@@ -343,7 +343,7 @@ export default function CalendarPage() {
                       className={cn(
                         "absolute z-10 flex items-center overflow-hidden",
                         "whitespace-nowrap cursor-pointer select-none",
-                        "text-[11px] font-medium leading-none",
+                        "text-xs font-medium leading-none",
                         "hover:brightness-110 hover:shadow-sm transition-[filter,box-shadow]",
                         isSpanning ? "rounded-full px-2" : "rounded px-1.5",
                       )}
@@ -375,7 +375,7 @@ export default function CalendarPage() {
           {/* Weekday labels */}
           <div className="grid grid-cols-7 px-1 pt-1">
             {WEEKDAYS_MIN.map((d, i) => (
-              <div key={i} className="text-center text-[10px] font-medium text-muted-foreground py-1">
+              <div key={i} className="text-center text-xs font-medium text-muted-foreground py-1">
                 {d}
               </div>
             ))}
@@ -415,7 +415,7 @@ export default function CalendarPage() {
                           : "text-muted-foreground/50 hover:bg-muted",
                       )}
                     >
-                      <span className="text-sm leading-none">{day.getDate()}</span>
+                      <span className="text-base leading-none">{day.getDate()}</span>
                       {hasEvent && (
                         <span className={cn(
                           "mt-0.5 h-1 w-1 rounded-full",
@@ -462,7 +462,7 @@ export default function CalendarPage() {
                       : "bg-muted/40",
                   )}>
                     <span className={cn(
-                      "text-sm font-semibold",
+                      "text-base font-semibold",
                       isToday ? "text-primary" : "text-foreground",
                     )}>
                       {isToday ? "Today · " : ""}
@@ -490,8 +490,8 @@ export default function CalendarPage() {
                           style={{ backgroundColor: ev.color ?? DEFAULT_COLOR }}
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium leading-snug">{ev.title}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
+                          <p className="text-base font-medium leading-snug">{ev.title}</p>
+                          <p className="text-sm text-muted-foreground mt-0.5">
                             {formatTime(ev.start_at)}
                             {ev.end_at && <> – {formatTime(ev.end_at)}</>}
                           </p>

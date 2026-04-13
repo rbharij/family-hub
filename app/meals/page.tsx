@@ -281,8 +281,8 @@ export default function MealsPage() {
                       : "hover:bg-muted",
                   )}
                 >
-                  <span className="text-xs font-medium">{DAY_LABELS[di]}</span>
-                  <span className="text-lg font-bold leading-tight">{day.getDate()}</span>
+                  <span className="text-sm font-medium">{DAY_LABELS[di]}</span>
+                  <span className="text-xl font-bold leading-tight">{day.getDate()}</span>
                   <div className="flex gap-0.5 mt-0.5 h-1">
                     {Array.from({ length: dotCount }).map((_, i) => (
                       <span
@@ -403,14 +403,14 @@ function DayColumn({
           : "bg-muted border-b-2 border-border",
       )}>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-sm font-bold">
+          <span className="text-base font-bold">
             {mobile ? DAY_FULL[dayIdx] : DAY_LABELS[dayIdx]}
           </span>
-          <span className={cn("text-xs font-medium", isToday ? "opacity-80" : "text-muted-foreground")}>
+          <span className={cn("text-sm font-medium", isToday ? "opacity-80" : "text-muted-foreground")}>
             {day.getDate()}
           </span>
           {isToday && (
-            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider opacity-75">
+            <span className="ml-auto text-xs font-bold uppercase tracking-wider opacity-75">
               Today
             </span>
           )}
@@ -470,26 +470,26 @@ function MealSlot({ label, emoji, meal, mobile, onClick }: {
     >
       <div className="flex items-center gap-1.5 mb-2 shrink-0">
         <span className="text-sm leading-none">{emoji}</span>
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
       </div>
       {meal ? (
         <div className="flex-1 min-w-0 w-full">
-          <p className={cn("font-semibold leading-snug", mobile ? "text-base" : "text-sm")}>
+          <p className={cn("font-semibold leading-snug", mobile ? "text-lg" : "text-base")}>
             {meal.title}
           </p>
           {meal.notes && (
             <p className={cn(
               "text-muted-foreground leading-snug mt-0.5 line-clamp-2",
-              mobile ? "text-sm" : "text-xs",
+              mobile ? "text-base" : "text-sm",
             )}>
               {meal.notes}
             </p>
           )}
         </div>
       ) : (
-        <p className={cn("text-muted-foreground/40 italic", mobile ? "text-sm" : "text-xs")}>
+        <p className={cn("text-muted-foreground/40 italic", mobile ? "text-base" : "text-sm")}>
           Tap to add…
         </p>
       )}
@@ -516,7 +516,7 @@ function LunchboxSlot({ child, meal, mobile, onClick }: {
       {/* Child label badge */}
       <div className="flex items-center gap-1.5 mb-2 shrink-0">
         <span
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold"
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold"
           style={{
             backgroundColor: `${accentColor}20`,
             color: accentColor,
@@ -530,20 +530,20 @@ function LunchboxSlot({ child, meal, mobile, onClick }: {
 
       {meal ? (
         <div className="flex-1 min-w-0 w-full">
-          <p className={cn("font-semibold leading-snug", mobile ? "text-base" : "text-sm")}>
+          <p className={cn("font-semibold leading-snug", mobile ? "text-lg" : "text-base")}>
             {meal.title}
           </p>
           {meal.notes && (
             <p className={cn(
               "text-muted-foreground leading-snug mt-0.5 line-clamp-2",
-              mobile ? "text-sm" : "text-xs",
+              mobile ? "text-base" : "text-sm",
             )}>
               {meal.notes}
             </p>
           )}
         </div>
       ) : (
-        <p className={cn("italic", mobile ? "text-sm" : "text-xs")}
+        <p className={cn("italic", mobile ? "text-base" : "text-sm")}
           style={{ color: `${accentColor}60` }}>
           Tap to add…
         </p>
