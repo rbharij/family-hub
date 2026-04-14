@@ -13,6 +13,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 const WALL_TABLES = [
   { table: "events" },
   { table: "chores" },
+  { table: "chore_streaks" },
   { table: "meals" },
   { table: "messages" },
   { table: "birthdays" },
@@ -63,6 +64,7 @@ interface WallMessage {
 }
 
 interface BirthdayRow { id:string; name:string; date:string; type:"birthday"|"anniversary"; color:string }
+interface WallChoreStreak { member_id: string; streak_count: number; longest_streak: number }
 
 interface Weather {
   temp: number          // °C
@@ -190,6 +192,7 @@ export default function WallPage() {
   const [lunchboxesTomorrow, setLunchboxesTomorrow] = useState<Meal[]>([])
   const [wallMessages, setWallMessages]       = useState<WallMessage[]>([])
   const [wallMsgFilter, setWallMsgFilter]     = useState<Set<string>>(new Set())
+  const [choreStreaks, setChoreStreaks]        = useState<Map<string, WallChoreStreak>>(new Map())
 
   // ── Clock tick ─────────────────────────────────────────────────────────────
 
@@ -208,7 +211,7 @@ export default function WallPage() {
     const todayStr    = toDateStr(today)
     const tomorrowStr = toDateStr(tomorrow)
 
-    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes, bdRes] = await Promise.all([
+    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes, bdRes, streaksRes] = await Promise.all([
       supabase
         .from("events")
         .select("id, title, start_at, end_at, color")
@@ -235,10 +238,18 @@ export default function WallPage() {
       supabase
         .from("birthdays")
         .select("id, name, date, type, color"),
+      supabase
+        .from("chore_streaks")
+        .select("member_id, streak_count, longest_streak"),
     ])
 
     setEvents(eventsRes.data ?? [])
     setBirthdays(bdRes.data ?? [])
+    const streakMap = new Map<string, WallChoreStreak>()
+    for (const row of (streaksRes.data ?? []) as WallChoreStreak[]) {
+      streakMap.set(row.member_id, row)
+    }
+    setChoreStreaks(streakMap)
     const memberList = membersRes.data ?? []
     setMembers(memberList)
     // Initialise wall message filter to all members on first load
@@ -475,6 +486,19 @@ export default function WallPage() {
                     >
                       {member?.name ?? "Unassigned"}
                     </span>
+                    {member && (() => {
+                      const s = choreStreaks.get(member.id)
+                      if (!s || s.streak_count < 1) return null
+                      const isHot = s.streak_count >= 7
+                      return (
+                        <span
+                          className={cn("font-bold tabular-nums", isHot ? "text-2xl text-orange-500" : "text-xl text-amber-500")}
+                          style={isHot ? { textShadow: "0 0 8px #f59e0b, 0 0 16px #f59e0b80" } : undefined}
+                        >
+                          🔥 {s.streak_count}
+                        </span>
+                      )
+                    })()}
                   </div>
                   {/* Chore rows */}
                   <div className="space-y-2 pl-1">

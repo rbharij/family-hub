@@ -18,6 +18,12 @@ import { ProgressRing } from "./_progress-ring"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+interface ChoreStreak {
+  member_id: string
+  streak_count: number
+  longest_streak: number
+}
+
 interface MemberSummary {
   member: FamilyMember
   total: number
@@ -52,6 +58,7 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
   const [weekStart, setWeekStart] = useState(initialWeekStart)
   const [chores, setChores] = useState<Chore[]>([])
   const [loading, setLoading] = useState(true)
+  const [streaks, setStreaks] = useState<Map<string, ChoreStreak>>(new Map())
   const firedConfetti = useRef(new Set<string>())
   const supabase = useRef(createClient()).current
 
@@ -75,6 +82,21 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
     firedConfetti.current.clear()
     fetchChores()
   }, [fetchChores])
+
+  // ── Fetch streaks ──────────────────────────────────────────────────────────
+
+  const fetchStreaks = useCallback(async () => {
+    const { data } = await supabase
+      .from("chore_streaks")
+      .select("member_id, streak_count, longest_streak")
+    const map = new Map<string, ChoreStreak>()
+    for (const row of (data ?? []) as ChoreStreak[]) {
+      map.set(row.member_id, row)
+    }
+    setStreaks(map)
+  }, [supabase])
+
+  useEffect(() => { fetchStreaks() }, [fetchStreaks])
 
   // Realtime: keep summary in sync with grid completions
   useEffect(() => {
@@ -232,6 +254,7 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
                 key={s.member.id}
                 summary={s}
                 color={s.member.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]}
+                streak={streaks.get(s.member.id) ?? null}
               />
             ))}
           </div>
@@ -243,7 +266,7 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
 
 // ── Member card ────────────────────────────────────────────────────────────────
 
-function MemberCard({ summary, color }: { summary: MemberSummary; color: string }) {
+function MemberCard({ summary, color, streak }: { summary: MemberSummary; color: string; streak: ChoreStreak | null }) {
   const { member, total, done, earned, chores } = summary
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   const allDone = total > 0 && done === total
@@ -311,6 +334,25 @@ function MemberCard({ summary, color }: { summary: MemberSummary; color: string 
             >
               S${earned.toFixed(2)}
             </span>
+          </div>
+        )}
+
+        {/* Streak */}
+        {streak && streak.streak_count > 0 && (
+          <div
+            className="flex items-center gap-3 rounded-xl px-5 py-3 w-full"
+            style={{ backgroundColor: `${color}10` }}
+          >
+            <span
+              className={streak.streak_count >= 7 ? "text-3xl" : "text-2xl"}
+              style={streak.streak_count >= 7 ? { textShadow: "0 0 8px #f59e0b, 0 0 16px #f59e0b80" } : undefined}
+            >
+              🔥
+            </span>
+            <div>
+              <p className="text-lg font-bold leading-tight">{streak.streak_count} day streak</p>
+              <p className="text-xs text-muted-foreground">Longest ever: {streak.longest_streak} days</p>
+            </div>
           </div>
         )}
       </div>

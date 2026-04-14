@@ -38,6 +38,16 @@ import { WeeklySummary } from "./_weekly-summary"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
 const CHORES_TABLES = [{ table: "chores" }] as const
+const STREAK_TABLES = [{ table: "chore_streaks" }] as const
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface ChoreStreak {
+  member_id: string
+  streak_count: number
+  longest_streak: number
+  last_completed_date: string | null
+}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +75,9 @@ export default function ChoresPage() {
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<Chore | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Streak data: memberId → ChoreStreak
+  const [streaks, setStreaks] = useState<Map<string, ChoreStreak>>(new Map())
 
   // Weekly summary overlay
   const [summaryOpen, setSummaryOpen] = useState(false)
@@ -114,10 +127,26 @@ export default function ChoresPage() {
     fetchChores()
   }, [fetchChores])
 
+  // ── Streaks ───────────────────────────────────────────────────────────────
+
+  const fetchStreaks = useCallback(async () => {
+    const { data } = await supabase
+      .from("chore_streaks")
+      .select("member_id, streak_count, longest_streak, last_completed_date")
+    const map = new Map<string, ChoreStreak>()
+    for (const row of (data ?? []) as ChoreStreak[]) {
+      map.set(row.member_id, row)
+    }
+    setStreaks(map)
+  }, [supabase])
+
+  useEffect(() => { fetchStreaks() }, [fetchStreaks])
+
   // ── Realtime ──────────────────────────────────────────────────────────────
 
   // ── Realtime (with backoff reconnection + status reporting) ──────────────
   useRealtimeChannel(supabase, `chores-week-${toDateStr(weekStart)}`, CHORES_TABLES, fetchChores)
+  useRealtimeChannel(supabase, "chores-streaks", STREAK_TABLES, fetchStreaks)
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
@@ -182,6 +211,12 @@ export default function ChoresPage() {
       // Revert optimistic update
       setChores((prev) => prev.map((c) => c.id === chore.id ? chore : c))
       toast.error("Couldn't update chore. Please try again.")
+    } else if (completed && chore.assigned_to && chore.due_date) {
+      // Fire-and-forget streak update; re-fetch streak state afterwards
+      supabase.rpc("update_chore_streak", {
+        p_member_id: chore.assigned_to,
+        p_date: chore.due_date,
+      }).then(() => fetchStreaks())
     }
   }
 
@@ -257,6 +292,9 @@ export default function ChoresPage() {
   // Filter out unassigned row if empty
   const unassignedChores = Array.from(cellMap.get("__unassigned__")?.values() ?? []).flat()
   const showUnassigned = unassignedChores.length > 0
+
+  // Index of today within the displayed week (-1 if viewing another week)
+  const todayIdx = days.findIndex((d) => toDateStr(d) === toDateStr(today))
 
   // ── Pocket money totals per member (completed chores this week) ─────────────
   const weeklyEarnings = new Map<string, number>()
@@ -398,6 +436,12 @@ export default function ChoresPage() {
                   >
                     {member?.name ?? "Unassigned"}
                   </span>
+                  {member && (() => {
+                    const s = streaks.get(member.id)
+                    return s && s.streak_count >= 1
+                      ? <StreakBadge streak={s.streak_count} longest={s.longest_streak} />
+                      : null
+                  })()}
                   {member && weeklyEarnings.has(member.id) && (
                     <span
                       className="ml-auto text-sm font-semibold tabular-nums"
@@ -471,7 +515,7 @@ export default function ChoresPage() {
                   <div className="flex flex-col gap-1">
                     {member ? (
                       <>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-base leading-none">{member.avatar_emoji}</span>
                           <span
                             className="text-xs font-medium truncate"
@@ -479,6 +523,13 @@ export default function ChoresPage() {
                           >
                             {member.name}
                           </span>
+                          {(() => {
+                            const hasTodayChores = todayIdx >= 0 && (cellMap.get(member.id)?.get(todayIdx)?.length ?? 0) > 0
+                            const s = hasTodayChores ? streaks.get(member.id) : undefined
+                            return s && s.streak_count >= 1
+                              ? <StreakBadge streak={s.streak_count} longest={s.longest_streak} />
+                              : null
+                          })()}
                         </div>
                         {/* Weekly earnings — only shown when there's at least one valued chore */}
                         {weeklyEarnings.has(member.id) && (
@@ -623,6 +674,32 @@ export default function ChoresPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// ── Streak badge sub-component ─────────────────────────────────────────────────
+
+function StreakBadge({ streak, longest }: { streak: number; longest: number }) {
+  const isHot = streak >= 7
+  return (
+    <Popover>
+      <PopoverTrigger
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-bold tabular-nums select-none",
+          isHot ? "text-orange-500" : "text-amber-500",
+        )}
+        style={isHot ? { textShadow: "0 0 8px #f59e0b, 0 0 16px #f59e0b80" } : undefined}
+        aria-label={`${streak} day streak`}
+      >
+        <span className={isHot ? "text-sm" : "text-xs"}>🔥</span>
+        {streak}
+      </PopoverTrigger>
+      <PopoverContent side="top" align="center" className="w-auto px-3 py-2 text-sm">
+        <p className="font-semibold">{streak} day streak 🔥</p>
+        <p className="text-xs text-muted-foreground">Longest ever: {longest} days</p>
+      </PopoverContent>
+    </Popover>
   )
 }
 
