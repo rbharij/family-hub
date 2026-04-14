@@ -366,9 +366,6 @@ export default function WallPage() {
             </span>
             <div>
               <p className="text-xl text-foreground font-medium">{dateLabel}</p>
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-widest mt-0.5">
-                Family Hub
-              </p>
             </div>
           </div>
 
