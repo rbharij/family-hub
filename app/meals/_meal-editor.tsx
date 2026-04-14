@@ -15,6 +15,7 @@ import {
   MEAL_LABELS, MEAL_EMOJIS, DAY_FULL,
   type Meal, type MealType,
 } from "./_utils"
+import { PlantPicker, type Plant } from "@/app/plants/_plant-picker"
 
 // ── Props ──────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ export function MealEditor({
   const [saving, setSaving]   = useState(false)
   const [clearing, setClearing] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  const [selectedPlants, setSelectedPlants] = useState<Plant[]>([])
 
   const supabase = createClient()
 
@@ -54,8 +56,20 @@ export function MealEditor({
       setTitle(isSchool ? "" : (meal?.title ?? ""))
       setNotes(meal?.notes ?? "")
       setError(null)
+      setSelectedPlants([])
     }
   }, [open, meal])
+
+  // ── Week start helper ──────────────────────────────────────────────────────
+
+  function mealWeekStart(): string {
+    const d = new Date(date + "T00:00:00")
+    const day = d.getDay()
+    const offset = (day + 6) % 7
+    d.setDate(d.getDate() - offset)
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  }
 
   // ── Save ───────────────────────────────────────────────────────────────────
 
@@ -71,13 +85,30 @@ export function MealEditor({
         for_member_id: forMemberId,
       }
 
+      let mealId: string | null = meal?.id ?? null
+
       if (meal) {
         const { error } = await supabase.from("meals").update(payload).eq("id", meal.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from("meals").insert(payload)
+        const { data: newMeal, error } = await supabase.from("meals").insert(payload).select("id").single()
         if (error) throw error
+        mealId = newMeal?.id ?? null
       }
+
+      // Log any selected plants for the week
+      if (selectedPlants.length > 0) {
+        const weekStart = mealWeekStart()
+        for (const plant of selectedPlants) {
+          await supabase.rpc("log_plant_for_week", {
+            p_plant_id:   plant.id,
+            p_week_start: weekStart,
+            p_added_by:   "meal",
+            p_meal_id:    mealId,
+          })
+        }
+      }
+
       onClose()
       onSaved()
     } catch (err) {
@@ -162,6 +193,12 @@ export function MealEditor({
               rows={2}
             />
           </div>
+
+          <PlantPicker
+            selected={selectedPlants}
+            onAdd={(p) => setSelectedPlants((prev) => prev.some((x) => x.id === p.id) ? prev : [...prev, p])}
+            onRemove={(id) => setSelectedPlants((prev) => prev.filter((x) => x.id !== id))}
+          />
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
