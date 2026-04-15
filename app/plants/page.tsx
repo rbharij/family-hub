@@ -179,28 +179,34 @@ export default function PlantsPage() {
         toast.success(`🌱🎉 ${m.name} hit 30 plants this week!`)
       }
     })
-    const familyCount = new Set(mwPlants.map(w => w.plant_id)).size
-    if (familyCount >= GOAL && !firedFamily.current) {
+    // Family goal = every member has hit 30
+    const allDone = members.length > 0 && members.every(m =>
+      new Set(mwPlants.filter(w => w.member_id === m.id).map(w => w.plant_id)).size >= GOAL
+    )
+    if (allDone && !firedFamily.current) {
       firedFamily.current = true
       setTimeout(() => {
         confetti({ particleCount: 200, spread: 100, origin: { y: 0.5 },
           colors: ["#22c55e", "#ffffff", "#fde68a"], zIndex: 9999 })
-        toast.success("🌳 Family goal reached! 30 plants this week!")
+        toast.success("🌳 Family goal reached! Everyone hit 30 plants!")
       }, 400)
     }
   }, [mwPlants, members, loading, weekStart])
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const libraryMap     = new Map(library.map(p => [p.id, p]))
-  const familyPlantIds = new Set(mwPlants.map(w => w.plant_id))
-  const familyCount    = familyPlantIds.size
-  const familyPct      = Math.min(100, Math.round((familyCount / GOAL) * 100))
-  const familyGoal     = familyCount >= GOAL
+  const libraryMap = new Map(library.map(p => [p.id, p]))
 
   function memberPlantIds(memberId: string) {
     return new Set(mwPlants.filter(w => w.member_id === memberId).map(w => w.plant_id))
   }
+
+  // Family total = sum of each member's individual count
+  // Family goal  = every member hits 30 (total = members × 30)
+  const familyGoal  = members.length > 0 && members.every(m => memberPlantIds(m.id).size >= GOAL)
+  const familyCount = members.reduce((sum, m) => sum + memberPlantIds(m.id).size, 0)
+  const familyMax   = members.length * GOAL
+  const familyPct   = familyMax > 0 ? Math.min(100, Math.round((familyCount / familyMax) * 100)) : 0
 
   function isNew(plantId: string, memberId: string): boolean {
     const d = discoveries.find(x => x.plant_id === plantId && x.member_id === memberId)
@@ -381,7 +387,7 @@ export default function PlantsPage() {
           sm:w-[200px]"
           style={{ borderColor: familyGoal ? "#22c55e" : undefined }}
         >
-          <GrowingPlant count={familyCount} size="lg" />
+          <GrowingPlant count={familyGoal ? 30 : Math.floor((familyPct / 100) * 30)} size="lg" />
 
           <div className="w-full space-y-2">
             <div className="flex items-center justify-between">
@@ -392,7 +398,7 @@ export default function PlantsPage() {
                 "text-xl font-black tabular-nums",
                 familyGoal ? "text-green-500" : "text-foreground",
               )}>
-                {familyCount}<span className="text-xs font-normal text-muted-foreground"> / {GOAL}</span>
+                {familyCount}<span className="text-xs font-normal text-muted-foreground"> / {familyMax}</span>
               </span>
             </div>
             <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
@@ -406,7 +412,7 @@ export default function PlantsPage() {
             </div>
             {!familyGoal && (
               <p className="text-[11px] text-muted-foreground text-center">
-                {GOAL - familyCount} more to reach the goal
+                {familyMax - familyCount} more to reach the goal
               </p>
             )}
           </div>
