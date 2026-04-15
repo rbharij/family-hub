@@ -56,8 +56,12 @@ export function MealEditor({
   // Other children this lunchbox could be copied to
   const otherChildren = allChildren.filter((c) => c.id !== forMemberId)
 
-  // For dinner, always log to all members — no selector needed
-  const isDinner = mealType === "dinner"
+  // Dinner: auto-log to all, no selector shown
+  // Lunch: selector shown, user picks who had it (default all)
+  // Lunchbox: selector shown, default that child
+  const isDinner  = mealType === "dinner"
+  const isLunch   = mealType === "lunch"
+  const isLunchbox = mealType === "lunchbox"
 
   // ── Load family members once on mount ─────────────────────────────────────
 
@@ -105,14 +109,14 @@ export function MealEditor({
   }, [open, meal, supabase])
 
   // ── Default eater selection ────────────────────────────────────────────────
-  // Dinner → all members (fixed, no picker shown)
-  // Lunchbox (existing meal) → whoever already has plants logged for it
-  // Lunchbox (new) → just the child this lunchbox is for
+  // Dinner  → all members, fixed (no picker shown)
+  // Lunch   → all members by default, picker shown so user can deselect
+  // Lunchbox (existing) → whoever has plants logged for it
+  // Lunchbox (new)      → just the child this lunchbox is for
 
   useEffect(() => {
     if (!open || members.length === 0) return
     if (isDinner) {
-      // Always all members for dinner
       setEaterIds(members.map((m) => m.id))
     } else if (meal?.id) {
       supabase
@@ -121,11 +125,13 @@ export function MealEditor({
         .eq("meal_id", meal.id)
         .then(({ data }) => {
           const ids = Array.from(new Set((data ?? []).map((r) => r.member_id)))
-          setEaterIds(ids.length > 0 ? ids : forMemberId ? [forMemberId] : members.map((m) => m.id))
+          const fallback = forMemberId ? [forMemberId] : members.map((m) => m.id)
+          setEaterIds(ids.length > 0 ? ids : fallback)
         })
     } else if (forMemberId) {
       setEaterIds([forMemberId])
     } else {
+      // New lunch (or any shared meal) → everyone by default
       setEaterIds(members.map((m) => m.id))
     }
   }, [open, meal, members, forMemberId, isDinner, supabase])
@@ -172,7 +178,7 @@ export function MealEditor({
   async function handleSave() {
     if (!schoolLunch && !title.trim()) { setError("Please enter a meal title."); return }
     if (!isDinner && selectedPlants.length > 0 && eaterIds.length === 0) {
-      setError("Please select who ate these plants."); return
+      setError("Please select who this applies to."); return
     }
     setSaving(true); setError(null)
     try {
@@ -180,7 +186,7 @@ export function MealEditor({
       const mealNotes   = notes.trim() || null
       const weekStart   = mealWeekStart()
 
-      // Effective eaters: dinner → everyone; lunchbox → chosen eaterIds
+      // Dinner → all members always; lunch/lunchbox → user-selected eaterIds
       const effectiveEaterIds = isDinner ? members.map((m) => m.id) : eaterIds
 
       // ── Upsert the primary meal record ─────────────────────────────────
@@ -311,9 +317,9 @@ export function MealEditor({
                 onChange={(e) => setTitle(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSave()}
                 placeholder={
-                  mealType === "dinner"
-                    ? "e.g. Spaghetti Bolognese"
-                    : "e.g. Ham & cheese sandwich"
+                  mealType === "dinner"  ? "e.g. Spaghetti Bolognese" :
+                  mealType === "lunch"   ? "e.g. Chicken salad" :
+                  "e.g. Ham & cheese sandwich"
                 }
                 autoFocus={mealType !== "lunchbox"}
               />
@@ -333,6 +339,17 @@ export function MealEditor({
             />
           </div>
 
+          {/* Lunch: who does this apply to — always shown */}
+          {isLunch && members.length > 0 && (
+            <MemberSelector
+              members={members}
+              selected={eaterIds}
+              onChange={setEaterIds}
+              label="Who had lunch?"
+              required
+            />
+          )}
+
           {/* Plant picker */}
           <PlantPicker
             selected={selectedPlants}
@@ -340,8 +357,15 @@ export function MealEditor({
             onRemove={(id) => setSelectedPlants((prev) => prev.filter((x) => x.id !== id))}
           />
 
-          {/* Member selector — lunchbox only, shown when plants are selected */}
-          {!isDinner && selectedPlants.length > 0 && members.length > 0 && (
+          {/* Dinner: plants auto-assigned to everyone */}
+          {isDinner && selectedPlants.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              🌿 Plant foods will be added to everyone&apos;s count.
+            </p>
+          )}
+
+          {/* Lunchbox: member selector shown when plants are selected */}
+          {isLunchbox && selectedPlants.length > 0 && members.length > 0 && (
             <MemberSelector
               members={members}
               selected={eaterIds}
@@ -349,13 +373,6 @@ export function MealEditor({
               label="Who ate these plants?"
               required
             />
-          )}
-
-          {/* Dinner: plants auto-assigned to everyone — show a hint */}
-          {isDinner && selectedPlants.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              🌿 Plant foods will be added to everyone&apos;s count.
-            </p>
           )}
 
           {/* Copy to other kids — lunchbox only */}

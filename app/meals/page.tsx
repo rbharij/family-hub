@@ -124,6 +124,10 @@ export default function MealsPage() {
     return meals.find((m) => m.date === date && m.meal_type === "dinner") ?? null
   }
 
+  function getLunch(date: string): Meal | null {
+    return meals.find((m) => m.date === date && m.meal_type === "lunch") ?? null
+  }
+
   function getLunchbox(date: string, memberId: string): Meal | null {
     return meals.find(
       (m) => m.date === date && m.meal_type === "lunchbox" && m.for_member_id === memberId,
@@ -288,6 +292,7 @@ export default function MealsPage() {
               dayIdx={di}
               isToday={toDateStr(day) === toDateStr(today)}
               dinnerMeal={getDinner(toDateStr(day))}
+              lunchMeal={getLunch(toDateStr(day))}
               childMembers={childMembers}
               getLunchbox={(memberId) => getLunchbox(toDateStr(day), memberId)}
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
@@ -347,6 +352,7 @@ export default function MealsPage() {
               dayIdx={mobileDay}
               isToday={toDateStr(days[mobileDay]) === toDateStr(today)}
               dinnerMeal={getDinner(toDateStr(days[mobileDay]))}
+              lunchMeal={getLunch(toDateStr(days[mobileDay]))}
               childMembers={childMembers}
               getLunchbox={(memberId) => getLunchbox(toDateStr(days[mobileDay]), memberId)}
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
@@ -417,12 +423,13 @@ function SummaryPill({ emoji, count, total, label, loading }: {
 
 function DayColumn({
   day, dayIdx, isToday,
-  dinnerMeal, childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
+  dinnerMeal, lunchMeal, childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
 }: {
   day: Date
   dayIdx: number
   isToday: boolean
   dinnerMeal: Meal | null
+  lunchMeal: Meal | null
   childMembers: FamilyMember[]
   getLunchbox: (memberId: string) => Meal | null
   onSlotClick: (type: MealType, meal: Meal | null, forMemberId: string | null, forMemberName: string | null) => void
@@ -482,6 +489,14 @@ function DayColumn({
           meal={dinnerMeal}
           mobile={mobile}
           onClick={() => onSlotClick("dinner", dinnerMeal, null, null)}
+        />
+
+        <MealSlot
+          label="Lunch"
+          emoji={MEAL_EMOJIS.lunch}
+          meal={lunchMeal}
+          mobile={mobile}
+          onClick={() => onSlotClick("lunch", lunchMeal, null, null)}
         />
 
         {childMembers.map((child) => {

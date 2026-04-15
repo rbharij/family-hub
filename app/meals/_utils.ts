@@ -1,4 +1,4 @@
-export type MealType = "dinner" | "lunchbox"
+export type MealType = "dinner" | "lunch" | "lunchbox"
 
 export interface Meal {
   id: string
@@ -47,19 +47,22 @@ export function weekDays(monday: Date): Date[] {
 export const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 export const DAY_FULL   = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-export const MEAL_TYPES: MealType[] = ["dinner", "lunchbox"]
+export const MEAL_TYPES: MealType[] = ["dinner", "lunch", "lunchbox"]
 
 export const MEAL_LABELS: Record<MealType, string> = {
   dinner:   "Dinner",
+  lunch:    "Lunch",
   lunchbox: "Lunchbox",
 }
 
 export const MEAL_PLACEHOLDERS: Record<MealType, string> = {
   dinner:   "Add dinner…",
+  lunch:    "Add lunch…",
   lunchbox: "Add lunchbox…",
 }
 
 export const MEAL_EMOJIS: Record<MealType, string> = {
   dinner:   "🍽️",
+  lunch:    "🥗",
   lunchbox: "🥪",
 }
