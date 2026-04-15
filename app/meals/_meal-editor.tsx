@@ -30,12 +30,14 @@ interface MealEditorProps {
   mealType: MealType
   forMemberId: string | null // set for lunchbox rows
   forMemberName: string | null
+  allChildren?: FamilyMember[] // all child members (for "copy to other kids" feature)
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function MealEditor({
-  open, onClose, onSaved, meal, date, dayIndex, mealType, forMemberId, forMemberName,
+  open, onClose, onSaved, meal, date, dayIndex, mealType,
+  forMemberId, forMemberName, allChildren = [],
 }: MealEditorProps) {
   const [title, setTitle]             = useState("")
   const [notes, setNotes]             = useState("")
@@ -46,9 +48,16 @@ export function MealEditor({
   const [selectedPlants, setSelectedPlants] = useState<Plant[]>([])
   const [members, setMembers]         = useState<FamilyMember[]>([])
   const [eaterIds, setEaterIds]       = useState<string[]>([])
+  const [copyToOthers, setCopyToOthers] = useState(false)
 
   const supabase = useRef(createClient()).current
   const SCHOOL_LUNCH = "School Lunch"
+
+  // Other children this lunchbox could be copied to
+  const otherChildren = allChildren.filter((c) => c.id !== forMemberId)
+
+  // For dinner, always log to all members — no selector needed
+  const isDinner = mealType === "dinner"
 
   // ── Load family members once on mount ─────────────────────────────────────
 
@@ -69,6 +78,7 @@ export function MealEditor({
     setTitle(isSchool ? "" : (meal?.title ?? ""))
     setNotes(meal?.notes ?? "")
     setError(null)
+    setCopyToOthers(false)
 
     if (meal?.id) {
       // Load plants already logged for this meal
@@ -78,7 +88,6 @@ export function MealEditor({
         .eq("meal_id", meal.id)
         .then(({ data }) => {
           if (!data) { setSelectedPlants([]); return }
-          // Deduplicate by plant_id (multiple members may share the same plant)
           const seen = new Set<string>()
           const plants: Plant[] = []
           for (const row of data) {
@@ -95,12 +104,17 @@ export function MealEditor({
     }
   }, [open, meal, supabase])
 
-  // Apply default eater selection whenever members list or open state changes.
-  // For existing meals: pre-select whoever already has plants logged for it.
-  // For new meals: lunchbox → just that child; dinner/breakfast → all members.
+  // ── Default eater selection ────────────────────────────────────────────────
+  // Dinner → all members (fixed, no picker shown)
+  // Lunchbox (existing meal) → whoever already has plants logged for it
+  // Lunchbox (new) → just the child this lunchbox is for
+
   useEffect(() => {
     if (!open || members.length === 0) return
-    if (meal?.id) {
+    if (isDinner) {
+      // Always all members for dinner
+      setEaterIds(members.map((m) => m.id))
+    } else if (meal?.id) {
       supabase
         .from("member_weekly_plants")
         .select("member_id")
@@ -114,7 +128,7 @@ export function MealEditor({
     } else {
       setEaterIds(members.map((m) => m.id))
     }
-  }, [open, meal, members, forMemberId, supabase])
+  }, [open, meal, members, forMemberId, isDinner, supabase])
 
   // ── Week start helper ──────────────────────────────────────────────────────
 
@@ -131,35 +145,42 @@ export function MealEditor({
 
   async function handleSave() {
     if (!schoolLunch && !title.trim()) { setError("Please enter a meal title."); return }
-    if (selectedPlants.length > 0 && eaterIds.length === 0) {
+    if (!isDinner && selectedPlants.length > 0 && eaterIds.length === 0) {
       setError("Please select who ate these plants."); return
     }
     setSaving(true); setError(null)
     try {
-      const payload = {
-        date,
-        meal_type: mealType,
-        title: schoolLunch ? SCHOOL_LUNCH : title.trim(),
-        notes: notes.trim() || null,
-        for_member_id: forMemberId,
-      }
+      const mealTitle   = schoolLunch ? SCHOOL_LUNCH : title.trim()
+      const mealNotes   = notes.trim() || null
+      const weekStart   = mealWeekStart()
 
+      // Effective eaters: dinner → everyone; lunchbox → chosen eaterIds
+      const effectiveEaterIds = isDinner ? members.map((m) => m.id) : eaterIds
+
+      // ── Upsert the primary meal record ─────────────────────────────────
       let mealId: string | null = meal?.id ?? null
 
       if (meal) {
-        const { error } = await supabase.from("meals").update(payload).eq("id", meal.id)
+        const { error } = await supabase.from("meals").update({
+          date, meal_type: mealType,
+          title: mealTitle, notes: mealNotes,
+          for_member_id: forMemberId,
+        }).eq("id", meal.id)
         if (error) throw error
       } else {
-        const { data: newMeal, error } = await supabase.from("meals").insert(payload).select("id").single()
+        const { data: newMeal, error } = await supabase.from("meals").insert({
+          date, meal_type: mealType,
+          title: mealTitle, notes: mealNotes,
+          for_member_id: forMemberId,
+        }).select("id").single()
         if (error) throw error
         mealId = newMeal?.id ?? null
       }
 
-      // Log plants per member
-      if (selectedPlants.length > 0 && eaterIds.length > 0) {
-        const weekStart = mealWeekStart()
+      // ── Log plants for this meal ────────────────────────────────────────
+      if (selectedPlants.length > 0 && effectiveEaterIds.length > 0) {
         for (const plant of selectedPlants) {
-          for (const memberId of eaterIds) {
+          for (const memberId of effectiveEaterIds) {
             await supabase.rpc("log_plant_for_member", {
               p_plant_id:   plant.id,
               p_member_id:  memberId,
@@ -167,6 +188,54 @@ export function MealEditor({
               p_added_by:   "meal",
               p_meal_id:    mealId,
             })
+          }
+        }
+      }
+
+      // ── Copy to other kids (lunchbox only) ─────────────────────────────
+      if (mealType === "lunchbox" && copyToOthers && otherChildren.length > 0) {
+        for (const child of otherChildren) {
+          // Check if the child already has a lunchbox for this date
+          const { data: existing } = await supabase
+            .from("meals")
+            .select("id")
+            .eq("date", date)
+            .eq("meal_type", "lunchbox")
+            .eq("for_member_id", child.id)
+            .maybeSingle()
+
+          let childMealId: string | null = existing?.id ?? null
+
+          if (!childMealId) {
+            const { data: newChildMeal, error: childErr } = await supabase
+              .from("meals")
+              .insert({
+                date, meal_type: "lunchbox",
+                title: mealTitle, notes: mealNotes,
+                for_member_id: child.id,
+              })
+              .select("id")
+              .single()
+            if (childErr) throw childErr
+            childMealId = newChildMeal?.id ?? null
+          } else {
+            // Update existing lunchbox to match
+            await supabase.from("meals").update({
+              title: mealTitle, notes: mealNotes,
+            }).eq("id", childMealId)
+          }
+
+          // Log the same plants for this child
+          if (selectedPlants.length > 0 && childMealId) {
+            for (const plant of selectedPlants) {
+              await supabase.rpc("log_plant_for_member", {
+                p_plant_id:   plant.id,
+                p_member_id:  child.id,
+                p_week_start: weekStart,
+                p_added_by:   "meal",
+                p_meal_id:    childMealId,
+              })
+            }
           }
         }
       }
@@ -263,8 +332,8 @@ export function MealEditor({
             onRemove={(id) => setSelectedPlants((prev) => prev.filter((x) => x.id !== id))}
           />
 
-          {/* Member selector — only shown when plants are selected */}
-          {selectedPlants.length > 0 && members.length > 0 && (
+          {/* Member selector — lunchbox only, shown when plants are selected */}
+          {!isDinner && selectedPlants.length > 0 && members.length > 0 && (
             <MemberSelector
               members={members}
               selected={eaterIds}
@@ -272,6 +341,27 @@ export function MealEditor({
               label="Who ate these plants?"
               required
             />
+          )}
+
+          {/* Dinner: plants auto-assigned to everyone — show a hint */}
+          {isDinner && selectedPlants.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              🌿 Plant foods will be added to everyone&apos;s count.
+            </p>
+          )}
+
+          {/* Copy to other kids — lunchbox only */}
+          {mealType === "lunchbox" && otherChildren.length > 0 && (
+            <div className="flex items-center gap-2.5">
+              <Checkbox
+                id="copy-to-others"
+                checked={copyToOthers}
+                onCheckedChange={(v) => setCopyToOthers(Boolean(v))}
+              />
+              <Label htmlFor="copy-to-others" className="cursor-pointer font-medium">
+                Also add for {otherChildren.map((c) => c.name).join(" & ")}
+              </Label>
+            </div>
           )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}

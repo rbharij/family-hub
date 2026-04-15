@@ -370,6 +370,7 @@ export default function MealsPage() {
         mealType={editType}
         forMemberId={editForMemberId}
         forMemberName={editForMemberName}
+        allChildren={childMembers}
       />
 
       {/* ── Copy Last Week confirmation ──────────────────────────────────── */}
