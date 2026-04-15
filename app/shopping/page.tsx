@@ -35,7 +35,6 @@ interface ShoppingItem {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const TAB_NAMES = ["Groceries", "School", "Travel", "Misc"] as const
 const UNDO_DELAY = 3000
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
@@ -46,14 +45,18 @@ const SHOPPING_TABLES = [{ table: "shopping_items" }] as const
 export default function ShoppingPage() {
   const [lists, setLists]         = useState<ShoppingList[]>([])
   const [items, setItems]         = useState<ShoppingItem[]>([])
-  const [activeTab, setActiveTab] = useState<string>(TAB_NAMES[0])
+  const [activeTab, setActiveTab] = useState<string>("")
   const [loading, setLoading]     = useState(true)
 
   const supabase = useRef(createClient()).current
 
   useEffect(() => {
-    supabase.from("shopping_lists").select("id, name").in("name", TAB_NAMES)
-      .then(({ data }) => setLists(data ?? []))
+    supabase.from("shopping_lists").select("id, name").order("created_at")
+      .then(({ data }) => {
+        const loaded = (data ?? []) as ShoppingList[]
+        setLists(loaded)
+        if (loaded.length > 0) setActiveTab((prev) => prev || loaded[0].name)
+      })
   }, [supabase])
 
   const fetchItems = useCallback(async () => {
@@ -90,11 +93,9 @@ export default function ShoppingPage() {
       .single()
 
     if (error || !data) {
-      // Revert
       setItems((prev) => prev.filter((i) => i.id !== tempId))
       toast.error("Couldn't add item. Please try again.")
     } else {
-      // Replace temp row with real row from DB
       setItems((prev) => prev.map((i) => i.id === tempId ? data as ShoppingItem : i))
     }
   }
@@ -114,7 +115,6 @@ export default function ShoppingPage() {
 
   // ── Optimistic delete ────────────────────────────────────────────────────
   function deleteItem(item: ShoppingItem) {
-    // Optimistically remove from parent state
     setItems((prev) => prev.filter((i) => i.id !== item.id))
 
     const tid = setTimeout(async () => {
@@ -127,7 +127,6 @@ export default function ShoppingPage() {
         label: "Undo",
         onClick: () => {
           clearTimeout(tid)
-          // Put the item back
           setItems((prev) => {
             const exists = prev.some((i) => i.id === item.id)
             return exists ? prev : [...prev, item].sort(
@@ -152,6 +151,25 @@ export default function ShoppingPage() {
     }
   }
 
+  // ── Rename list ───────────────────────────────────────────────────────────
+  async function renameList(listId: string, oldName: string, newName: string) {
+    const trimmed = newName.trim()
+    if (!trimmed || trimmed === oldName) return
+    // Optimistic update
+    setLists((prev) => prev.map((l) => l.id === listId ? { ...l, name: trimmed } : l))
+    if (activeTab === oldName) setActiveTab(trimmed)
+    const { error } = await supabase
+      .from("shopping_lists")
+      .update({ name: trimmed })
+      .eq("id", listId)
+    if (error) {
+      // Revert
+      setLists((prev) => prev.map((l) => l.id === listId ? { ...l, name: oldName } : l))
+      if (activeTab === trimmed) setActiveTab(oldName)
+      toast.error("Couldn't rename list.")
+    }
+  }
+
   // ── Clear helpers ─────────────────────────────────────────────────────────
   async function clearCompleted(listId: string) {
     const toRemove = items.filter((i) => i.list_id === listId && i.completed)
@@ -173,7 +191,6 @@ export default function ShoppingPage() {
     }
   }
 
-  function listByName(name: string) { return lists.find((l) => l.name === name) }
   function itemsForList(listId: string) { return items.filter((i) => i.list_id === listId) }
   function uncheckedCount(listId: string) {
     return itemsForList(listId).filter((i) => !i.completed).length
@@ -187,18 +204,17 @@ export default function ShoppingPage() {
         {/* Tab bar */}
         <TabsList variant="line"
           className="w-full justify-start border-b rounded-none px-0 h-auto pb-0 shrink-0 gap-0">
-          {TAB_NAMES.map((name) => {
-            const list  = listByName(name)
-            const count = list ? uncheckedCount(list.id) : 0
+          {lists.map((list) => {
+            const count = uncheckedCount(list.id)
             return (
-              <TabsTrigger key={name} value={name}
+              <TabsTrigger key={list.id} value={list.name}
                 className="rounded-none px-4 py-2.5 text-sm border-b-2 -mb-px gap-2">
-                {name}
+                {list.name}
                 {count > 0 && (
                   <span className={cn(
                     "inline-flex items-center justify-center rounded-full text-[11px] font-bold",
                     "min-w-[20px] h-5 px-1.5",
-                    activeTab === name
+                    activeTab === list.name
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground",
                   )}>{count}</span>
@@ -209,32 +225,25 @@ export default function ShoppingPage() {
         </TabsList>
 
         {/* Panels */}
-        {TAB_NAMES.map((name) => {
-          const list = listByName(name)
-          return (
-            <TabsContent key={name} value={name}
-              className="flex-1 min-h-0 overflow-hidden flex flex-col mt-0">
-              <ErrorBoundary label={`${name} list`}>
-                {list
-                  ? <ListPanel
-                      list={list}
-                      items={itemsForList(list.id)}
-                      loading={loading}
-                      onAdd={(n, q) => addItem(list.id, n, q)}
-                      onToggle={toggleItem}
-                      onDelete={(item) => deleteItem(item)}
-                      onUpdate={updateItem}
-                      onClearCompleted={() => clearCompleted(list.id)}
-                      onClearAll={() => clearAll(list.id, name)}
-                    />
-                  : <div className="flex-1 px-4 py-4 space-y-2">
-                      {[1,2,3].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
-                    </div>
-                }
-              </ErrorBoundary>
-            </TabsContent>
-          )
-        })}
+        {lists.map((list) => (
+          <TabsContent key={list.id} value={list.name}
+            className="flex-1 min-h-0 overflow-hidden flex flex-col mt-0">
+            <ErrorBoundary label={`${list.name} list`}>
+              <ListPanel
+                list={list}
+                items={itemsForList(list.id)}
+                loading={loading}
+                onAdd={(n, q) => addItem(list.id, n, q)}
+                onToggle={toggleItem}
+                onDelete={(item) => deleteItem(item)}
+                onUpdate={updateItem}
+                onClearCompleted={() => clearCompleted(list.id)}
+                onClearAll={() => clearAll(list.id, list.name)}
+                onRename={(newName) => renameList(list.id, list.name, newName)}
+              />
+            </ErrorBoundary>
+          </TabsContent>
+        ))}
       </Tabs>
     </div>
   )
@@ -252,17 +261,21 @@ interface ListPanelProps {
   onUpdate: (item: ShoppingItem, name: string, qty: number) => void
   onClearCompleted: () => void
   onClearAll: () => void
+  onRename: (newName: string) => void
 }
 
 function ListPanel({
   list, items, loading,
-  onAdd, onToggle, onDelete, onUpdate, onClearCompleted, onClearAll,
+  onAdd, onToggle, onDelete, onUpdate, onClearCompleted, onClearAll, onRename,
 }: ListPanelProps) {
-  const [draft, setDraft]       = useState("")
-  const [draftQty, setDraftQty] = useState(1)
-  const [adding, setAdding]     = useState(false)
+  const [draft, setDraft]           = useState("")
+  const [draftQty, setDraftQty]     = useState(1)
+  const [adding, setAdding]         = useState(false)
   const [clearAllOpen, setClearAllOpen] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState("")
+  const inputRef  = useRef<HTMLInputElement>(null)
+  const renameRef = useRef<HTMLInputElement>(null)
 
   const unchecked = items.filter((i) => !i.completed)
   const checked   = items.filter((i) => i.completed)
@@ -276,6 +289,16 @@ function ListPanel({
     await onAdd(name, draftQty)
     setAdding(false)
     inputRef.current?.focus()
+  }
+
+  function openRename() {
+    setRenameValue(list.name)
+    setRenameOpen(true)
+  }
+
+  function commitRename() {
+    onRename(renameValue)
+    setRenameOpen(false)
   }
 
   return (
@@ -295,6 +318,9 @@ function ListPanel({
               <MoreHorizontal className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={openRename}>
+                Rename list
+              </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={checked.length === 0}
                 onSelect={onClearCompleted}
@@ -414,6 +440,38 @@ function ListPanel({
         </div>
       </div>
 
+      {/* Rename dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Rename list</DialogTitle>
+          </DialogHeader>
+          <Input
+            ref={renameRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename()
+              if (e.key === "Escape") setRenameOpen(false)
+            }}
+            autoFocus
+            className="h-10"
+          />
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={commitRename}
+              disabled={!renameValue.trim() || renameValue.trim() === list.name}
+            >
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Clear all confirmation */}
       <Dialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
         <DialogContent className="max-w-sm">
@@ -425,7 +483,9 @@ function ListPanel({
             <strong>{list.name}</strong>. This cannot be undone.
           </p>
           <DialogFooter className="gap-2">
-            <DialogClose>Cancel</DialogClose>
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
             <Button variant="destructive" size="sm" onClick={() => { onClearAll(); setClearAllOpen(false) }}>
               Clear all
             </Button>
@@ -514,7 +574,7 @@ function ItemRow({
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()}  // prevent blur on input
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => setEditQty((q) => Math.max(1, q - 1))}
             className="h-8 w-8 rounded-md border text-sm font-bold hover:bg-muted transition-colors flex items-center justify-center"
           >−</button>
