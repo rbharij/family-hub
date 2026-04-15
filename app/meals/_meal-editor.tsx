@@ -141,6 +141,39 @@ export function MealEditor({
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   }
 
+  // ── Plant logging helper ───────────────────────────────────────────────────
+  // The RPC uses ON CONFLICT DO NOTHING, so if the plant was already logged
+  // this week (e.g. via the Plants page) the insert is skipped and meal_id
+  // never gets set.  We follow up with an explicit UPDATE so the meal
+  // association is always stamped on the row regardless.
+
+  async function logPlantsForMeal(
+    plantIds: string[],
+    memberIds: string[],
+    weekStart: string,
+    mealId: string,
+  ) {
+    for (const plantId of plantIds) {
+      for (const memberId of memberIds) {
+        // 1. Log / discover the plant (handles plant_discoveries upsert)
+        await supabase.rpc("log_plant_for_member", {
+          p_plant_id:   plantId,
+          p_member_id:  memberId,
+          p_week_start: weekStart,
+          p_added_by:   "meal",
+          p_meal_id:    mealId,
+        })
+        // 2. Ensure meal_id is set even if the row already existed
+        await supabase
+          .from("member_weekly_plants")
+          .update({ meal_id: mealId })
+          .eq("plant_id", plantId)
+          .eq("member_id", memberId)
+          .eq("week_start", weekStart)
+      }
+    }
+  }
+
   // ── Save ───────────────────────────────────────────────────────────────────
 
   async function handleSave() {
@@ -178,18 +211,8 @@ export function MealEditor({
       }
 
       // ── Log plants for this meal ────────────────────────────────────────
-      if (selectedPlants.length > 0 && effectiveEaterIds.length > 0) {
-        for (const plant of selectedPlants) {
-          for (const memberId of effectiveEaterIds) {
-            await supabase.rpc("log_plant_for_member", {
-              p_plant_id:   plant.id,
-              p_member_id:  memberId,
-              p_week_start: weekStart,
-              p_added_by:   "meal",
-              p_meal_id:    mealId,
-            })
-          }
-        }
+      if (selectedPlants.length > 0 && effectiveEaterIds.length > 0 && mealId) {
+        await logPlantsForMeal(selectedPlants.map(p => p.id), effectiveEaterIds, weekStart, mealId)
       }
 
       // ── Copy to other kids (lunchbox only) ─────────────────────────────
@@ -227,15 +250,7 @@ export function MealEditor({
 
           // Log the same plants for this child
           if (selectedPlants.length > 0 && childMealId) {
-            for (const plant of selectedPlants) {
-              await supabase.rpc("log_plant_for_member", {
-                p_plant_id:   plant.id,
-                p_member_id:  child.id,
-                p_week_start: weekStart,
-                p_added_by:   "meal",
-                p_meal_id:    childMealId,
-              })
-            }
+            await logPlantsForMeal(selectedPlants.map(p => p.id), [child.id], weekStart, childMealId)
           }
         }
       }
