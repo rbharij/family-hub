@@ -532,8 +532,8 @@ export default function PlantsPage() {
             {/* Plant emoji grid */}
             <div className="p-4">
               {loading ? (
-                <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
-                  {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
+                <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-11 gap-2">
+                  {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-14 rounded-lg" />)}
                 </div>
               ) : loggedPlants.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
@@ -545,7 +545,7 @@ export default function PlantsPage() {
                   </Button>
                 </div>
               ) : (
-                <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
+                <div className="grid grid-cols-6 sm:grid-cols-8 lg:grid-cols-11 gap-2">
                   {loggedPlants.map(p => (
                     <PlantCard
                       key={p.id}
@@ -665,14 +665,14 @@ function PlantCard({ plant, isNew, onDelete }: {
   return (
     <div className="relative group aspect-square">
       <div className={cn(
-        "relative flex flex-col items-center justify-center gap-1 rounded-xl p-2 h-full",
+        "relative flex flex-col items-center justify-center gap-0.5 rounded-lg p-1 h-full",
         "border-2 border-transparent hover:border-border transition-all",
         CATEGORY_COLORS[plant.category] ?? CATEGORY_COLORS.other,
       )}>
         {/* Plant emoji */}
-        <span className="text-[28px] leading-none select-none">{plant.emoji ?? "🌿"}</span>
+        <span className="text-[20px] leading-none select-none">{plant.emoji ?? "🌿"}</span>
         {/* Plant name */}
-        <span className="text-[11px] font-semibold text-center leading-tight line-clamp-2">
+        <span className="text-[9px] font-semibold text-center leading-tight line-clamp-2">
           {plant.name}
         </span>
 

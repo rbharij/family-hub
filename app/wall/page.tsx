@@ -413,8 +413,8 @@ export default function WallPage() {
         </button>
       </header>
 
-      {/* ── 2×2 Grid ───────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2">
+      {/* ── 3-column grid: [2fr 2fr 1fr] × 2 rows ─────────────────────── */}
+      <div className="flex-1 min-h-0 grid grid-rows-2" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
 
         {/* ── Top Left: This Week's Events ──────────────────────────────── */}
         <ErrorBoundary label="This week's events">
@@ -582,57 +582,6 @@ export default function WallPage() {
 
           </div>
 
-          {/* Plant strip */}
-          {(() => {
-            const familyTotal = new Set(wallMemberPlants.map((wp) => wp.plant_id)).size
-            if (familyTotal === 0) return null
-            const familyGoal = familyTotal >= 30
-            return (
-              <div className="shrink-0 border-t bg-muted/20 px-4 py-2">
-                <div className="flex items-center gap-4">
-                  {/* Animated growing plant SVG */}
-                  <div className="shrink-0">
-                    <GrowingPlant count={familyTotal} size="sm" />
-                  </div>
-
-                  {/* Right side: family label + per-member counts */}
-                  <div className="flex flex-col gap-1.5 min-w-0">
-                    {/* Family total */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={cn(
-                        "text-lg font-black tabular-nums leading-none",
-                        familyGoal ? "text-green-500" : "text-foreground",
-                      )}>
-                        {familyGoal ? "🌳 Goal reached!" : `🌿 Family: ${familyTotal} / 30`}
-                      </span>
-                    </div>
-
-                    {/* Per-member mini counts */}
-                    {members.length > 0 && (
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {members.map((m) => {
-                          const memberCount = new Set(
-                            wallMemberPlants.filter((wp) => wp.member_id === m.id).map((wp) => wp.plant_id)
-                          ).size
-                          if (memberCount === 0) return null
-                          const memberGoal = memberCount >= 30
-                          return (
-                            <span key={m.id} className={cn(
-                              "inline-flex items-center gap-1 text-base font-bold tabular-nums",
-                              memberGoal ? "text-green-500" : "text-muted-foreground",
-                            )}>
-                              {m.avatar_emoji ?? "👤"} {memberCount}
-                              {memberGoal && <span className="text-sm">✨</span>}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
         </section>
         </ErrorBoundary>
 
@@ -744,6 +693,84 @@ export default function WallPage() {
                   </div>
                 )
               })
+            })()}
+          </div>
+        </section>
+        </ErrorBoundary>
+
+        {/* ── Plants column — spans both rows ────────────────────────────── */}
+        <ErrorBoundary label="Plants panel">
+        <section className="row-span-2 border-l flex flex-col overflow-hidden">
+          <div className="shrink-0 px-4 pt-4 pb-3 border-b bg-muted/30">
+            <h2 className="text-xl font-bold leading-none">🌿 Plants</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col items-center gap-4">
+            {(() => {
+              const familyTotal = new Set(wallMemberPlants.map((wp) => wp.plant_id)).size
+              const familyGoal  = familyTotal >= 30
+              return (
+                <>
+                  {/* Animated growing plant */}
+                  <GrowingPlant count={familyTotal} size="sm" />
+
+                  {/* Family total */}
+                  <div className="text-center">
+                    <p className={cn(
+                      "text-2xl font-black tabular-nums leading-none",
+                      familyGoal ? "text-green-500" : "text-foreground",
+                    )}>
+                      {familyTotal}
+                      <span className="text-base font-semibold text-muted-foreground"> / 30</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {familyGoal ? "🌳 Goal reached!" : "family plants"}
+                    </p>
+                  </div>
+
+                  {/* Per-member counts */}
+                  {members.length > 0 && (
+                    <div className="w-full flex flex-col gap-2 mt-1">
+                      {members.map((m) => {
+                        const count = new Set(
+                          wallMemberPlants.filter((wp) => wp.member_id === m.id).map((wp) => wp.plant_id)
+                        ).size
+                        const goal = count >= 30
+                        const pct  = Math.min(100, Math.round((count / 30) * 100))
+                        return (
+                          <div key={m.id} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium truncate">
+                                {m.avatar_emoji} {m.name}
+                              </span>
+                              <span className={cn(
+                                "font-bold tabular-nums shrink-0 ml-2",
+                                goal ? "text-green-500" : "text-foreground",
+                              )}>
+                                {count}{goal && " ✨"}
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  goal ? "bg-green-500" : "bg-primary",
+                                )}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {familyTotal === 0 && (
+                    <p className="text-sm text-muted-foreground text-center italic mt-2">
+                      No plants logged this week
+                    </p>
+                  )}
+                </>
+              )
             })()}
           </div>
         </section>

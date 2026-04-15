@@ -528,8 +528,8 @@ function DayColumn({
 
 // ── Generic meal slot (Dinner) ────────────────────────────────────────────────
 
-function MealSlot({ label, emoji, meal, mobile, onClick }: {
-  label: string; emoji: string; meal: Meal | null; mobile: boolean; onClick: () => void
+function MealSlot({ label, meal, mobile, onClick }: {
+  label: string; emoji?: string; meal: Meal | null; mobile: boolean; onClick: () => void
 }) {
   return (
     <button
@@ -541,7 +541,6 @@ function MealSlot({ label, emoji, meal, mobile, onClick }: {
       )}
     >
       <div className="flex items-center gap-1.5 mb-2 shrink-0">
-        <span className="text-sm leading-none">{emoji}</span>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
@@ -595,7 +594,6 @@ function LunchboxSlot({ child, meal, mobile, onClick }: {
           }}
         >
           {child.avatar_emoji && <span className="leading-none">{child.avatar_emoji}</span>}
-          {MEAL_EMOJIS.lunchbox}
           <span className="uppercase tracking-wider">{child.name}</span>
         </span>
       </div>
