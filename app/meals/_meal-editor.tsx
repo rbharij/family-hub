@@ -142,10 +142,9 @@ export function MealEditor({
   }
 
   // ── Plant logging helper ───────────────────────────────────────────────────
-  // The RPC uses ON CONFLICT DO NOTHING, so if the plant was already logged
-  // this week (e.g. via the Plants page) the insert is skipped and meal_id
-  // never gets set.  We follow up with an explicit UPDATE so the meal
-  // association is always stamped on the row regardless.
+  // Direct table operations — no RPC dependency.
+  // Upsert into member_weekly_plants so the row always exists and meal_id
+  // is always stamped, even if the plant was previously logged another way.
 
   async function logPlantsForMeal(
     plantIds: string[],
@@ -155,21 +154,15 @@ export function MealEditor({
   ) {
     for (const plantId of plantIds) {
       for (const memberId of memberIds) {
-        // 1. Log / discover the plant (handles plant_discoveries upsert)
-        await supabase.rpc("log_plant_for_member", {
-          p_plant_id:   plantId,
-          p_member_id:  memberId,
-          p_week_start: weekStart,
-          p_added_by:   "meal",
-          p_meal_id:    mealId,
-        })
-        // 2. Ensure meal_id is set even if the row already existed
-        await supabase
+        // Upsert: inserts if new, updates meal_id + added_by if row exists
+        const { error } = await supabase
           .from("member_weekly_plants")
-          .update({ meal_id: mealId })
-          .eq("plant_id", plantId)
-          .eq("member_id", memberId)
-          .eq("week_start", weekStart)
+          .upsert(
+            { plant_id: plantId, member_id: memberId, week_start: weekStart,
+              meal_id: mealId, added_by: "meal" },
+            { onConflict: "plant_id,member_id,week_start" },
+          )
+        if (error) throw new Error(`Could not log plant: ${error.message}`)
       }
     }
   }
