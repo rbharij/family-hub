@@ -416,65 +416,31 @@ export default function WallPage() {
       {/* ── 3-column grid: [2fr 2fr 1fr] × 2 rows ─────────────────────── */}
       <div className="flex-1 min-h-0 grid grid-rows-2" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
 
-        {/* ── Top Left: This Week's Events ──────────────────────────────── */}
-        <ErrorBoundary label="This week's events">
+        {/* ── Top Left: Meals ───────────────────────────────────────────── */}
+        <ErrorBoundary label="Meals panel">
         <section className="border-r border-b flex flex-col overflow-hidden">
           <div className="shrink-0 px-6 pt-5 pb-3 border-b bg-muted/30">
-            <h2 className="text-[28px] font-bold leading-none">📅 This Week</h2>
+            <h2 className="text-[28px] font-bold leading-none">🍽 Meals</h2>
           </div>
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-            {events.length === 0 ? (
-              <p className="text-xl text-muted-foreground italic mt-2">No events this week</p>
-            ) : (() => {
-              // Group by day label
-              const groups: { day: string; items: typeof events }[] = []
-              for (const ev of events) {
-                const day = formatEventDay(ev.start_at, toDateStr(new Date()))
-                const last = groups[groups.length - 1]
-                if (last?.day === day) last.items.push(ev)
-                else groups.push({ day, items: [ev] })
-              }
-              return groups.map(({ day, items }) => (
-                <div key={day}>
-                  <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-2">
-                    {day}
-                  </p>
-                  <div className="space-y-2.5">
-                    {items.map((ev) => (
-                      <div key={ev.id} className="flex items-start gap-4">
-                        <div
-                          className="mt-2 h-3.5 w-3.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: ev.color ?? "#3b82f6" }}
-                        />
-                        <div className="min-w-0">
-                          <p className="text-xl font-semibold leading-snug">{ev.title}</p>
-                          <p className="text-lg text-muted-foreground mt-0.5">
-                            {formatEventTime(ev.start_at)}
-                            {ev.end_at ? <> &ndash; {formatEventTime(ev.end_at)}</> : null}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            })()}
-          </div>
-
-          {upcomingBirthdays.length > 0 && (
-            <div className="shrink-0 border-t bg-muted/20 px-6 py-3 space-y-1.5">
-              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Coming up</p>
-              {upcomingBirthdays.map(b => (
-                <div key={b.id} className="flex items-center gap-2">
-                  <span className="text-lg leading-none">{b.type==="birthday"?"🎂":"❤️"}</span>
-                  <span className="text-base font-medium flex-1">{b.name}</span>
-                  <span className="text-sm text-muted-foreground shrink-0">
-                    {b.daysAway===0?"Today! 🎉":`${b.daysAway} day${b.daysAway!==1?"s":""}`}
-                  </span>
-                </div>
-              ))}
+          {/* Split: left = today, right = tomorrow */}
+          <div className="flex-1 min-h-0 flex flex-row divide-x">
+            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Today</p>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
+                <MealDayPanel dinner={dinnerToday} lunchboxes={lunchboxesToday} memberMap={memberMap} />
+              </div>
             </div>
-          )}
+            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Tomorrow</p>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
+                <MealDayPanel dinner={dinnerTomorrow} lunchboxes={lunchboxesTomorrow} memberMap={memberMap} />
+              </div>
+            </div>
+          </div>
         </section>
         </ErrorBoundary>
 
@@ -549,39 +515,59 @@ export default function WallPage() {
         </section>
         </ErrorBoundary>
 
-        {/* ── Bottom Left: Meals ─────────────────────────────────────────── */}
-        <ErrorBoundary label="Meals panel">
+        {/* ── Bottom Left: This Week's Events ───────────────────────────── */}
+        <ErrorBoundary label="This week's events">
         <section className="border-r flex flex-col overflow-hidden">
-          {/* Section title */}
           <div className="shrink-0 px-6 pt-5 pb-3 border-b bg-muted/30">
-            <h2 className="text-[28px] font-bold leading-none">🍽 Meals</h2>
+            <h2 className="text-[28px] font-bold leading-none">📅 This Week</h2>
           </div>
-
-          {/* Split: left = today, right = tomorrow */}
-          <div className="flex-1 min-h-0 flex flex-row divide-x">
-
-            {/* ── Today ── */}
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Today</p>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
-                <MealDayPanel dinner={dinnerToday} lunchboxes={lunchboxesToday} memberMap={memberMap} />
-              </div>
-            </div>
-
-            {/* ── Tomorrow ── */}
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Tomorrow</p>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
-                <MealDayPanel dinner={dinnerTomorrow} lunchboxes={lunchboxesTomorrow} memberMap={memberMap} />
-              </div>
-            </div>
-
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {events.length === 0 ? (
+              <p className="text-xl text-muted-foreground italic mt-2">No events this week</p>
+            ) : (() => {
+              const groups: { day: string; items: typeof events }[] = []
+              for (const ev of events) {
+                const day = formatEventDay(ev.start_at, toDateStr(new Date()))
+                const last = groups[groups.length - 1]
+                if (last?.day === day) last.items.push(ev)
+                else groups.push({ day, items: [ev] })
+              }
+              return groups.map(({ day, items }) => (
+                <div key={day}>
+                  <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-2">{day}</p>
+                  <div className="space-y-2.5">
+                    {items.map((ev) => (
+                      <div key={ev.id} className="flex items-start gap-4">
+                        <div className="mt-2 h-3.5 w-3.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: ev.color ?? "#3b82f6" }} />
+                        <div className="min-w-0">
+                          <p className="text-xl font-semibold leading-snug">{ev.title}</p>
+                          <p className="text-lg text-muted-foreground mt-0.5">
+                            {formatEventTime(ev.start_at)}
+                            {ev.end_at ? <> &ndash; {formatEventTime(ev.end_at)}</> : null}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            })()}
           </div>
-
+          {upcomingBirthdays.length > 0 && (
+            <div className="shrink-0 border-t bg-muted/20 px-6 py-3 space-y-1.5">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">Coming up</p>
+              {upcomingBirthdays.map(b => (
+                <div key={b.id} className="flex items-center gap-2">
+                  <span className="text-lg leading-none">{b.type==="birthday"?"🎂":"❤️"}</span>
+                  <span className="text-base font-medium flex-1">{b.name}</span>
+                  <span className="text-sm text-muted-foreground shrink-0">
+                    {b.daysAway===0?"Today! 🎉":`${b.daysAway} day${b.daysAway!==1?"s":""}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
         </ErrorBoundary>
 
