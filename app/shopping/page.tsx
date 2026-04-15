@@ -54,10 +54,10 @@ export default function ShoppingPage() {
     supabase.from("shopping_lists").select("id, name").order("created_at")
       .then(({ data }) => {
         const loaded = (data ?? []) as ShoppingList[]
-        // Batch both updates so there is never a render where lists has items
-        // but activeTab is still "" (which crashes Radix Tabs).
         setLists(loaded)
-        setActiveTab((prev) => (prev && loaded.some(l => l.name === prev)) ? prev : (loaded[0]?.name ?? ""))
+        // activeTab is the list ID — stable, never changes on rename.
+        // Keep existing selection if it's still valid, otherwise default to first.
+        setActiveTab((prev) => (prev && loaded.some(l => l.id === prev)) ? prev : (loaded[0]?.id ?? ""))
       })
   }, [supabase])
 
@@ -157,17 +157,14 @@ export default function ShoppingPage() {
   async function renameList(listId: string, oldName: string, newName: string) {
     const trimmed = newName.trim()
     if (!trimmed || trimmed === oldName) return
-    // Optimistic update
+    // Optimistic update — tab value is list.id so activeTab never needs to change
     setLists((prev) => prev.map((l) => l.id === listId ? { ...l, name: trimmed } : l))
-    if (activeTab === oldName) setActiveTab(trimmed)
     const { error } = await supabase
       .from("shopping_lists")
       .update({ name: trimmed })
       .eq("id", listId)
     if (error) {
-      // Revert
       setLists((prev) => prev.map((l) => l.id === listId ? { ...l, name: oldName } : l))
-      if (activeTab === trimmed) setActiveTab(oldName)
       toast.error("Couldn't rename list.")
     }
   }
@@ -225,14 +222,14 @@ export default function ShoppingPage() {
           {lists.map((list) => {
             const count = uncheckedCount(list.id)
             return (
-              <TabsTrigger key={list.id} value={list.name}
+              <TabsTrigger key={list.id} value={list.id}
                 className="rounded-none px-4 py-2.5 text-sm border-b-2 -mb-px gap-2">
                 {list.name}
                 {count > 0 && (
                   <span className={cn(
                     "inline-flex items-center justify-center rounded-full text-[11px] font-bold",
                     "min-w-[20px] h-5 px-1.5",
-                    activeTab === list.name
+                    activeTab === list.id
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground",
                   )}>{count}</span>
@@ -244,7 +241,7 @@ export default function ShoppingPage() {
 
         {/* Panels */}
         {lists.map((list) => (
-          <TabsContent key={list.id} value={list.name}
+          <TabsContent key={list.id} value={list.id}
             className="flex-1 min-h-0 overflow-hidden flex flex-col mt-0">
             <ErrorBoundary label={`${list.name} list`}>
               <ListPanel
