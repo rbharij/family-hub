@@ -169,6 +169,28 @@ export default function ShoppingPage() {
     }
   }
 
+  // ── Delete list ───────────────────────────────────────────────────────────
+  async function deleteList(listId: string, listName: string) {
+    const remaining = lists.filter((l) => l.id !== listId)
+    // Switch tab before removing so Tabs never has an orphaned value
+    if (activeTab === listId) {
+      setActiveTab(remaining[0]?.id ?? "")
+    }
+    setLists(remaining)
+    setItems((prev) => prev.filter((i) => i.list_id !== listId))
+    // Delete items first (FK constraint), then the list
+    await supabase.from("shopping_items").delete().eq("list_id", listId)
+    const { error } = await supabase.from("shopping_lists").delete().eq("id", listId)
+    if (error) {
+      // Revert — re-fetch to restore consistent state
+      supabase.from("shopping_lists").select("id, name").order("created_at")
+        .then(({ data }) => setLists((data ?? []) as ShoppingList[]))
+      toast.error("Couldn't delete list.")
+    } else {
+      toast(`Deleted "${listName}"`)
+    }
+  }
+
   // ── Clear helpers ─────────────────────────────────────────────────────────
   async function clearCompleted(listId: string) {
     const toRemove = items.filter((i) => i.list_id === listId && i.completed)
@@ -250,11 +272,12 @@ export default function ShoppingPage() {
                 loading={loading}
                 onAdd={(n, q) => addItem(list.id, n, q)}
                 onToggle={toggleItem}
-                onDelete={(item) => deleteItem(item)}
+                onDeleteItem={(item) => deleteItem(item)}
                 onUpdate={updateItem}
                 onClearCompleted={() => clearCompleted(list.id)}
                 onClearAll={() => clearAll(list.id, list.name)}
                 onRename={(newName) => renameList(list.id, list.name, newName)}
+                onDeleteList={() => deleteList(list.id, list.name)}
               />
             </ErrorBoundary>
           </TabsContent>
@@ -272,25 +295,27 @@ interface ListPanelProps {
   loading: boolean
   onAdd: (name: string, quantity: number) => void
   onToggle: (item: ShoppingItem) => void
-  onDelete: (item: ShoppingItem) => void
+  onDeleteItem: (item: ShoppingItem) => void
   onUpdate: (item: ShoppingItem, name: string, qty: number) => void
   onClearCompleted: () => void
   onClearAll: () => void
   onRename: (newName: string) => void
+  onDeleteList: () => void
 }
 
 function ListPanel({
   list, items, loading,
-  onAdd, onToggle, onDelete, onUpdate, onClearCompleted, onClearAll, onRename,
+  onAdd, onToggle, onDeleteItem, onUpdate, onClearCompleted, onClearAll, onRename, onDeleteList,
 }: ListPanelProps) {
-  const [draft, setDraft]           = useState("")
-  const [draftQty, setDraftQty]     = useState(1)
-  const [adding, setAdding]         = useState(false)
+  const [draft, setDraft]               = useState("")
+  const [draftQty, setDraftQty]         = useState(1)
+  const [adding, setAdding]             = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [renameOpen, setRenameOpen]     = useState(false)
+  const [renameValue, setRenameValue]   = useState("")
+  const [deleteListOpen, setDeleteListOpen] = useState(false)
   const [clearAllOpen, setClearAllOpen] = useState(false)
-  const [renameOpen, setRenameOpen] = useState(false)
-  const [renameValue, setRenameValue] = useState("")
-  const inputRef  = useRef<HTMLInputElement>(null)
-  const renameRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const unchecked = items.filter((i) => !i.completed)
   const checked   = items.filter((i) => i.completed)
@@ -306,9 +331,18 @@ function ListPanel({
     inputRef.current?.focus()
   }
 
-  function openRename() {
-    setRenameValue(list.name)
-    setRenameOpen(true)
+  // Radix DropdownMenu restores focus to its trigger on close, which fights
+  // with Dialog's own focus trap and prevents the dialog from opening.
+  // Fix: call e.preventDefault() to suppress Radix's close-and-focus-restore,
+  // then close the dropdown manually before opening the dialog.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function openDialog(action: () => void): (e: any) => void {
+    return (e) => {
+      e.preventDefault()
+      setDropdownOpen(false)
+      // Give the dropdown a tick to finish its close animation before the dialog opens
+      setTimeout(action, 0)
+    }
   }
 
   function commitRename() {
@@ -325,7 +359,7 @@ function ListPanel({
           <span className="text-xs text-muted-foreground">
             {unchecked.length} remaining · {checked.length} done
           </span>
-          <DropdownMenu>
+          <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
             <DropdownMenuTrigger
               className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-accent transition-colors"
               aria-label="List options"
@@ -333,7 +367,12 @@ function ListPanel({
               <MoreHorizontal className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={openRename}>
+              <DropdownMenuItem
+                onSelect={openDialog(() => {
+                  setRenameValue(list.name)
+                  setRenameOpen(true)
+                })}
+              >
                 Rename list
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -344,10 +383,16 @@ function ListPanel({
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={items.length === 0}
-                onSelect={() => setClearAllOpen(true)}
+                onSelect={openDialog(() => setClearAllOpen(true))}
                 className="text-destructive focus:text-destructive"
               >
                 Clear all ({items.length})
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={openDialog(() => setDeleteListOpen(true))}
+                className="text-destructive focus:text-destructive"
+              >
+                Delete list
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -369,7 +414,7 @@ function ListPanel({
           <ul className="divide-y">
             {unchecked.map((item) => (
               <ItemRow key={item.id} item={item}
-                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
+                onToggle={onToggle} onDelete={onDeleteItem} onUpdate={onUpdate} />
             ))}
 
             {unchecked.length > 0 && checked.length > 0 && (
@@ -382,7 +427,7 @@ function ListPanel({
 
             {checked.map((item) => (
               <ItemRow key={item.id} item={item}
-                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
+                onToggle={onToggle} onDelete={onDeleteItem} onUpdate={onUpdate} />
             ))}
           </ul>
         )}
@@ -455,14 +500,13 @@ function ListPanel({
         </div>
       </div>
 
-      {/* Rename dialog */}
+      {/* Rename dialog — rendered outside the dropdown so focus management works */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Rename list</DialogTitle>
           </DialogHeader>
           <Input
-            ref={renameRef}
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {
@@ -480,6 +524,25 @@ function ListPanel({
               disabled={!renameValue.trim() || renameValue.trim() === list.name}
             >
               Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete list confirmation */}
+      <Dialog open={deleteListOpen} onOpenChange={setDeleteListOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete &quot;{list.name}&quot;?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This will permanently delete the list and all {items.length} item{items.length !== 1 ? "s" : ""} in it.
+            This cannot be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <DialogClose>Cancel</DialogClose>
+            <Button variant="destructive" size="sm" onClick={() => { onDeleteList(); setDeleteListOpen(false) }}>
+              Delete list
             </Button>
           </DialogFooter>
         </DialogContent>
