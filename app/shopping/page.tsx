@@ -196,6 +196,21 @@ export default function ShoppingPage() {
     return itemsForList(listId).filter((i) => !i.completed).length
   }
 
+  // Don't render tabs until lists have loaded — Radix Tabs throws if value=""
+  // doesn't match any TabsTrigger child.
+  if (lists.length === 0) {
+    return (
+      <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
+        <div className="flex gap-4 border-b pb-2">
+          {[1,2,3,4].map((i) => <Skeleton key={i} className="h-8 w-20 rounded" />)}
+        </div>
+        <div className="space-y-2 px-1">
+          {[1,2,3,4,5].map((i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col lg:h-full p-3 lg:p-4">
       <Tabs value={activeTab} onValueChange={setActiveTab}
