@@ -463,11 +463,12 @@ function DayColumn({
             </span>
           )}
         </div>
-        {dayPlants && dayPlants.count > 0 && (
-          <p className="text-[10px] font-semibold mt-0.5 opacity-70">
-            {dayPlants.count} plant{dayPlants.count !== 1 ? "s" : ""}
-          </p>
-        )}
+        <p className="text-[10px] font-semibold mt-0.5 opacity-70 invisible-placeholder"
+          style={{ visibility: dayPlants && dayPlants.count > 0 ? "visible" : "hidden" }}>
+          {dayPlants && dayPlants.count > 0
+            ? `${dayPlants.count} plant${dayPlants.count !== 1 ? "s" : ""}`
+            : "0 plants"}
+        </p>
       </div>
 
       {/* Meal slots — uniform dividers via divide-y */}
