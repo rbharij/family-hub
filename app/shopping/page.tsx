@@ -54,8 +54,10 @@ export default function ShoppingPage() {
     supabase.from("shopping_lists").select("id, name").order("created_at")
       .then(({ data }) => {
         const loaded = (data ?? []) as ShoppingList[]
+        // Batch both updates so there is never a render where lists has items
+        // but activeTab is still "" (which crashes Radix Tabs).
         setLists(loaded)
-        if (loaded.length > 0) setActiveTab((prev) => prev || loaded[0].name)
+        setActiveTab((prev) => (prev && loaded.some(l => l.name === prev)) ? prev : (loaded[0]?.name ?? ""))
       })
   }, [supabase])
 
@@ -196,9 +198,10 @@ export default function ShoppingPage() {
     return itemsForList(listId).filter((i) => !i.completed).length
   }
 
-  // Don't render tabs until lists have loaded — Radix Tabs throws if value=""
-  // doesn't match any TabsTrigger child.
-  if (lists.length === 0) {
+  // Don't render tabs until lists have loaded AND activeTab is set.
+  // Radix Tabs throws if value="" doesn't match any TabsTrigger child.
+  // Guard both: lists could arrive before activeTab is batched in the same tick.
+  if (lists.length === 0 || !activeTab) {
     return (
       <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
         <div className="flex gap-4 border-b pb-2">
