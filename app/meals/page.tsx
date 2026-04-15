@@ -19,7 +19,7 @@ import {
 import { MealEditor } from "./_meal-editor"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
-const MEALS_TABLES = [{ table: "meals" }] as const
+const MEALS_TABLES = [{ table: "meals" }, { table: "member_weekly_plants" }] as const
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,8 @@ export default function MealsPage() {
   const [editForMemberId, setEditForMemberId]   = useState<string | null>(null)
   const [editForMemberName, setEditForMemberName] = useState<string | null>(null)
 
+  const [dayPlantMap, setDayPlantMap] = useState<Map<string, { count: number; plants: { name: string; emoji: string | null }[] }>>(new Map())
+
   const supabase        = useRef(createClient()).current
   const swipeStartX     = useRef<number | null>(null)
   const swipeStartY     = useRef<number | null>(null)
@@ -66,14 +68,49 @@ export default function MealsPage() {
   // ── Data ───────────────────────────────────────────────────────────────────
 
   const fetchMeals = useCallback(async () => {
-    const end = addDays(weekStart, 6)
-    const { data } = await supabase
-      .from("meals")
-      .select("*")
-      .gte("date", toDateStr(weekStart))
-      .lte("date", toDateStr(end))
-      .order("date")
-    setMeals(data ?? [])
+    const end   = addDays(weekStart, 6)
+    const wsStr = toDateStr(weekStart)
+
+    const [mealsRes, wpRes, plantsRes] = await Promise.all([
+      supabase
+        .from("meals")
+        .select("*")
+        .gte("date", wsStr)
+        .lte("date", toDateStr(end))
+        .order("date"),
+      supabase
+        .from("member_weekly_plants")
+        .select("plant_id, meal_id")
+        .eq("week_start", wsStr),
+      supabase
+        .from("plants")
+        .select("id, name, emoji"),
+    ])
+
+    const mealsData = mealsRes.data ?? []
+    setMeals(mealsData)
+
+    // Build dayPlantMap: date → { count unique plants, plants[] }
+    const plantLib    = new Map(
+      ((plantsRes.data ?? []) as { id: string; name: string; emoji: string | null }[]).map((p) => [p.id, p])
+    )
+    const mealDateMap = new Map((mealsData as { id: string; date: string }[]).map((m) => [m.id, m.date]))
+    const dpMap       = new Map<string, { count: number; plants: { name: string; emoji: string | null }[] }>()
+
+    for (const wp of (wpRes.data ?? []) as { plant_id: string; meal_id: string | null }[]) {
+      if (!wp.meal_id) continue
+      const date  = mealDateMap.get(wp.meal_id)
+      const plant = plantLib.get(wp.plant_id)
+      if (!date || !plant) continue
+      const entry = dpMap.get(date) ?? { count: 0, plants: [] }
+      // Deduplicate plant_ids across members for the same day
+      if (!entry.plants.some((p) => p.name === plant.name)) {
+        entry.count++
+        entry.plants.push({ name: plant.name, emoji: plant.emoji })
+      }
+      dpMap.set(date, entry)
+    }
+    setDayPlantMap(dpMap)
     setLoading(false)
   }, [supabase, weekStart])
 
@@ -256,6 +293,7 @@ export default function MealsPage() {
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
                 openEditor(toDateStr(day), di, type, meal, forMemberId, forMemberName)
               }
+              dayPlants={dayPlantMap.get(toDateStr(day))}
             />
           ))}
         </div>
@@ -314,6 +352,7 @@ export default function MealsPage() {
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
                 openEditor(toDateStr(days[mobileDay]), mobileDay, type, meal, forMemberId, forMemberName)
               }
+              dayPlants={dayPlantMap.get(toDateStr(days[mobileDay]))}
               mobile
             />
           </div>
@@ -377,7 +416,7 @@ function SummaryPill({ emoji, count, total, label, loading }: {
 
 function DayColumn({
   day, dayIdx, isToday,
-  dinnerMeal, childMembers, getLunchbox, onSlotClick, mobile = false,
+  dinnerMeal, childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
 }: {
   day: Date
   dayIdx: number
@@ -386,6 +425,7 @@ function DayColumn({
   childMembers: FamilyMember[]
   getLunchbox: (memberId: string) => Meal | null
   onSlotClick: (type: MealType, meal: Meal | null, forMemberId: string | null, forMemberName: string | null) => void
+  dayPlants?: { count: number; plants: { name: string; emoji: string | null }[] }
   mobile?: boolean
 }) {
   return (
@@ -415,6 +455,22 @@ function DayColumn({
             </span>
           )}
         </div>
+        {dayPlants && dayPlants.count > 0 && (
+          <div className={cn(
+            "flex items-center gap-1 mt-0.5 flex-wrap",
+            isToday ? "opacity-90" : "",
+          )}>
+            <span className="text-[10px] font-semibold opacity-70">🌿</span>
+            {dayPlants.plants.slice(0, 4).map((p, i) => (
+              <span key={i} className="text-sm leading-none" title={p.name}>
+                {p.emoji ?? "🌿"}
+              </span>
+            ))}
+            {dayPlants.count > 4 && (
+              <span className="text-[10px] font-medium opacity-70">+{dayPlants.count - 4}</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Meal slots — uniform dividers via divide-y */}

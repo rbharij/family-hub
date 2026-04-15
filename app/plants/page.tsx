@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Plus, Leaf } from "lucide-react"
+import confetti from "canvas-confetti"
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,6 +13,8 @@ import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import { PlantPicker, type Plant } from "./_plant-picker"
+import { MemberSelector, type FamilyMember } from "./_member-selector"
+import { GrowingPlant } from "./_growing-plant"
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -19,25 +22,25 @@ function pad(n: number) { return String(n).padStart(2, "0") }
 
 function getWeekStart(d: Date): string {
   const day = d.getDay()
-  const offset = (day + 6) % 7  // Mon = 0
-  const monday = new Date(d)
-  monday.setDate(d.getDate() - offset)
-  monday.setHours(0, 0, 0, 0)
-  return `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`
+  const offset = (day + 6) % 7
+  const mon = new Date(d)
+  mon.setDate(d.getDate() - offset)
+  mon.setHours(0, 0, 0, 0)
+  return `${mon.getFullYear()}-${pad(mon.getMonth() + 1)}-${pad(mon.getDate())}`
 }
 
-function addWeeks(dateStr: string, n: number): string {
-  const d = new Date(dateStr + "T00:00:00")
+function addWeeks(s: string, n: number): string {
+  const d = new Date(s + "T00:00:00")
   d.setDate(d.getDate() + n * 7)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 function weekLabel(weekStart: string): string {
-  const start = new Date(weekStart + "T00:00:00")
-  const end   = new Date(weekStart + "T00:00:00")
-  end.setDate(end.getDate() + 6)
+  const s = new Date(weekStart + "T00:00:00")
+  const e = new Date(weekStart + "T00:00:00")
+  e.setDate(e.getDate() + 6)
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }
-  return `${start.toLocaleDateString("en-AU", opts)} – ${end.toLocaleDateString("en-AU", opts)}, ${end.getFullYear()}`
+  return `${s.toLocaleDateString("en-AU", opts)} – ${e.toLocaleDateString("en-AU", opts)}, ${e.getFullYear()}`
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -53,31 +56,51 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
-  vegetable: "🥦 Vegetables",
-  fruit:     "🍎 Fruits",
-  herb:      "🌿 Herbs",
-  spice:     "🌶️ Spices",
-  nut:       "🌰 Nuts",
-  seed:      "🌱 Seeds",
-  legume:    "🫘 Legumes",
-  grain:     "🌾 Grains",
-  other:     "✨ Other",
+  vegetable: "🥦 Vegetables", fruit: "🍎 Fruits", herb: "🌿 Herbs",
+  spice: "🌶️ Spices", nut: "🌰 Nuts", seed: "🌱 Seeds",
+  legume: "🫘 Legumes", grain: "🌾 Grains", other: "✨ Other",
 }
 
 const ALL_CATEGORIES = ["vegetable","fruit","herb","spice","nut","seed","legume","grain","other"]
-
-const PLANT_TABLES = [{ table: "plants" }, { table: "weekly_plants" }] as const
-
 const GOAL = 30
+const FALLBACK_COLORS = ["#6366f1","#ec4899","#f59e0b","#14b8a6","#8b5cf6","#3b82f6"]
+
+const PLANT_TABLES = [
+  { table: "member_weekly_plants" },
+  { table: "plants" },
+  { table: "plant_discoveries" },
+] as const
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-interface WeeklyPlant {
-  id: string
-  plant_id: string
-  week_start: string
-  added_by: string
-  meal_id: string | null
+interface MemberWeeklyPlant {
+  plant_id:  string
+  member_id: string
+}
+
+interface PlantDiscovery {
+  plant_id:         string
+  member_id:        string
+  first_eaten_date: string
+}
+
+// ── Mini circular ring ────────────────────────────────────────────────────────
+
+function MiniRing({ pct, color, size = 56 }: { pct: number; color: string; size?: number }) {
+  const sw   = 5
+  const r    = (size - sw) / 2
+  const circ = 2 * Math.PI * r
+  const off  = circ - (pct / 100) * circ
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor"
+        strokeWidth={sw} className="opacity-10" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color}
+        strokeWidth={sw} strokeLinecap="round"
+        strokeDasharray={circ} strokeDashoffset={off}
+        style={{ transition: "stroke-dashoffset 0.8s cubic-bezier(0.4,0,0.2,1)" }} />
+    </svg>
+  )
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -85,120 +108,258 @@ interface WeeklyPlant {
 export default function PlantsPage() {
   const todayWeekStart = getWeekStart(new Date())
 
-  const [weekStart, setWeekStart] = useState(todayWeekStart)
-  const [library, setLibrary]     = useState<Plant[]>([])
-  const [weeklyPlants, setWeeklyPlants] = useState<WeeklyPlant[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [logOpen, setLogOpen]     = useState(false)
-  const [logSelected, setLogSelected] = useState<Plant[]>([])
-  const [logging, setLogging]     = useState(false)
-  const [newDiscoveries, setNewDiscoveries] = useState<Set<string>>(new Set())
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [weekStart, setWeekStart]       = useState(todayWeekStart)
+  const [library, setLibrary]           = useState<Plant[]>([])
+  const [members, setMembers]           = useState<FamilyMember[]>([])
+  const [mwPlants, setMwPlants]         = useState<MemberWeeklyPlant[]>([])
+  const [discoveries, setDiscoveries]   = useState<PlantDiscovery[]>([])
+  const [loading, setLoading]           = useState(true)
 
-  const supabase = useRef(createClient()).current
-  const isCurrentWeek = weekStart === todayWeekStart
+  // Log dialog
+  const [logOpen, setLogOpen]           = useState(false)
+  const [logPlants, setLogPlants]       = useState<Plant[]>([])
+  const [logMemberIds, setLogMemberIds] = useState<string[]>([])
+  const [logShowError, setLogShowError] = useState(false)
+  const [logging, setLogging]           = useState(false)
+
+  // Add-plant-for-member button target
+  const [logForMember, setLogForMember] = useState<FamilyMember | null>(null)
+
+  const supabase            = useRef(createClient()).current
+  const isCurrentWeek       = weekStart === todayWeekStart
+  const firedMember         = useRef(new Set<string>())
+  const firedFamily         = useRef(false)
+  const deleteTimers        = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const pageRef             = useRef<HTMLDivElement>(null)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
-  const fetchLibrary = useCallback(async () => {
-    const { data } = await supabase
-      .from("plants")
-      .select("id, name, emoji, category, times_eaten, first_eaten_date")
-      .order("name")
-    setLibrary((data ?? []) as Plant[])
-  }, [supabase])
-
-  const fetchWeeklyPlants = useCallback(async () => {
-    const { data } = await supabase
-      .from("weekly_plants")
-      .select("id, plant_id, week_start, added_by, meal_id")
-      .eq("week_start", weekStart)
-    setWeeklyPlants(data ?? [])
+  const fetchData = useCallback(async () => {
+    const [libRes, membersRes, mwRes, discRes] = await Promise.all([
+      supabase.from("plants")
+        .select("id, name, emoji, category, times_eaten, first_eaten_date")
+        .order("name"),
+      supabase.from("family_members")
+        .select("id, name, avatar_emoji, color")
+        .order("created_at"),
+      supabase.from("member_weekly_plants")
+        .select("plant_id, member_id")
+        .eq("week_start", weekStart),
+      supabase.from("plant_discoveries")
+        .select("plant_id, member_id, first_eaten_date"),
+    ])
+    setLibrary((libRes.data ?? []) as Plant[])
+    setMembers((membersRes.data ?? []) as FamilyMember[])
+    setMwPlants((mwRes.data ?? []) as MemberWeeklyPlant[])
+    setDiscoveries((discRes.data ?? []) as PlantDiscovery[])
     setLoading(false)
   }, [supabase, weekStart])
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([fetchLibrary(), fetchWeeklyPlants()])
-  }, [fetchLibrary, fetchWeeklyPlants])
+    firedMember.current.clear()
+    firedFamily.current = false
+    fetchData()
+  }, [fetchData])
 
-  useRealtimeChannel(supabase, `plants-${weekStart}`, PLANT_TABLES, () => {
-    fetchLibrary()
-    fetchWeeklyPlants()
-  })
+  useRealtimeChannel(supabase, `plants-${weekStart}`, PLANT_TABLES, fetchData)
+
+  // ── Confetti ────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (loading) return
+    members.forEach((m, idx) => {
+      const count = new Set(mwPlants.filter(w => w.member_id === m.id).map(w => w.plant_id)).size
+      const key   = `${m.id}-${weekStart}`
+      if (count >= GOAL && !firedMember.current.has(key)) {
+        firedMember.current.add(key)
+        const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+        confetti({ particleCount: 150, spread: 80, origin: { y: 0.55 },
+          colors: [color, "#ffffff", "#fde68a"], zIndex: 9999 })
+        toast.success(`🌱🎉 ${m.name} hit 30 plants this week!`)
+      }
+    })
+    const familyCount = new Set(mwPlants.map(w => w.plant_id)).size
+    if (familyCount >= GOAL && !firedFamily.current) {
+      firedFamily.current = true
+      setTimeout(() => {
+        confetti({ particleCount: 200, spread: 100, origin: { y: 0.5 },
+          colors: ["#22c55e", "#ffffff", "#fde68a"], zIndex: 9999 })
+        toast.success("🌳 Family goal reached! 30 plants this week!")
+      }, 400)
+    }
+  }, [mwPlants, members, loading, weekStart])
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const loggedPlantIds = new Set(weeklyPlants.map((wp) => wp.plant_id))
-  const loggedPlants   = library.filter((p) => loggedPlantIds.has(p.id))
-  const count          = loggedPlants.length
-  const pct            = Math.min(100, Math.round((count / GOAL) * 100))
-  const goalReached    = count >= GOAL
+  const libraryMap     = new Map(library.map(p => [p.id, p]))
+  const familyPlantIds = new Set(mwPlants.map(w => w.plant_id))
+  const familyCount    = familyPlantIds.size
+  const familyPct      = Math.min(100, Math.round((familyCount / GOAL) * 100))
+  const familyGoal     = familyCount >= GOAL
 
-  const filteredLibrary = categoryFilter
-    ? library.filter((p) => p.category === categoryFilter)
-    : library
+  function memberPlantIds(memberId: string) {
+    return new Set(mwPlants.filter(w => w.member_id === memberId).map(w => w.plant_id))
+  }
 
-  // ── Log handler ────────────────────────────────────────────────────────────
+  function isNew(plantId: string, memberId: string): boolean {
+    const d = discoveries.find(x => x.plant_id === plantId && x.member_id === memberId)
+    return !!d && d.first_eaten_date >= weekStart
+  }
 
-  async function logPlants(plants: Plant[]) {
-    if (plants.length === 0) return
-    setLogging(true)
-    const discoveries: string[] = []
+  // ── Scroll to member section ───────────────────────────────────────────────
 
-    for (const plant of plants) {
-      const { data } = await supabase.rpc("log_plant_for_week", {
-        p_plant_id:   plant.id,
-        p_week_start: weekStart,
-        p_added_by:   "manual",
-        p_meal_id:    null,
-      })
-      if (data && (data as { was_new_discovery: boolean }).was_new_discovery) {
-        discoveries.push(plant.id)
+  function scrollToMember(memberId: string) {
+    document.getElementById(`member-section-${memberId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+
+  // ── Log dialog ─────────────────────────────────────────────────────────────
+
+  function openLog(member: FamilyMember | null = null) {
+    setLogForMember(member)
+    setLogPlants([])
+    setLogMemberIds(member ? [member.id] : members.map(m => m.id))
+    setLogShowError(false)
+    setLogOpen(true)
+  }
+
+  async function submitLog() {
+    if (logPlants.length === 0 || logMemberIds.length === 0) {
+      setLogShowError(true); return
+    }
+    setLogging(true); setLogShowError(false)
+    const newDisc: Array<{ name: string; memberName: string }> = []
+
+    for (const plant of logPlants) {
+      for (const memberId of logMemberIds) {
+        const { data } = await supabase.rpc("log_plant_for_member", {
+          p_plant_id:   plant.id,
+          p_member_id:  memberId,
+          p_week_start: weekStart,
+          p_added_by:   "manual",
+          p_meal_id:    null,
+        })
+        if (data?.was_new_discovery) {
+          const m = members.find(m => m.id === memberId)
+          newDisc.push({ name: plant.name, memberName: m?.name ?? "Someone" })
+        }
       }
     }
 
-    if (discoveries.length > 0) {
-      setNewDiscoveries((prev) => new Set([...Array.from(prev), ...discoveries]))
-    }
-
-    await fetchLibrary()
-    await fetchWeeklyPlants()
+    await fetchData()
     setLogging(false)
     setLogOpen(false)
-    setLogSelected([])
+    setLogPlants([])
 
-    const newCount = count + plants.filter((p) => !loggedPlantIds.has(p.id)).length
-    if (newCount >= GOAL && count < GOAL) {
-      toast.success("🎉 30 plant goal reached this week!")
-    } else if (discoveries.length > 0) {
-      toast.success(`🎉 New discovery! First time eating ${plants.find((p) => discoveries.includes(p.id))?.name ?? "that plant"}`)
+    if (newDisc.length === 1) {
+      toast.success(`🎉 First time! ${newDisc[0].memberName} tried ${newDisc[0].name}`)
+    } else if (newDisc.length > 1) {
+      toast.success(`🎉 ${newDisc.length} new discoveries this week!`)
     } else {
-      toast.success(`Added ${plants.length} plant${plants.length > 1 ? "s" : ""} to this week`)
+      toast.success(`🌿 Logged ${logPlants.length} plant${logPlants.length > 1 ? "s" : ""}`)
     }
   }
 
-  async function quickLogPlant(plant: Plant) {
-    if (loggedPlantIds.has(plant.id)) {
-      toast.info(`${plant.emoji ?? "🌿"} ${plant.name} already logged this week`)
+  // ── Quick-log toggle (tap in library) ──────────────────────────────────────
+
+  async function quickLog(plant: Plant, memberId: string) {
+    const ids = memberPlantIds(memberId)
+    if (ids.has(plant.id)) {
+      scheduleDelete(plant.id, plant.name, memberId)
       return
     }
-    await logPlants([plant])
+    const { data } = await supabase.rpc("log_plant_for_member", {
+      p_plant_id:   plant.id,
+      p_member_id:  memberId,
+      p_week_start: weekStart,
+      p_added_by:   "manual",
+      p_meal_id:    null,
+    })
+    await fetchData()
+    if (data?.was_new_discovery) {
+      const m = members.find(m => m.id === memberId)
+      toast.success(`🎉 First time! ${m?.name ?? "Someone"} tried ${plant.name}`)
+    } else if (!data?.was_duplicate) {
+      toast.success(`Added ${plant.name}`)
+    }
+  }
+
+  // ── Delete with 3-second undo ──────────────────────────────────────────────
+
+  function scheduleDelete(plantId: string, plantName: string, memberId: string) {
+    const key = `${plantId}::${memberId}`
+
+    // Cancel any existing pending delete for same plant/member
+    if (deleteTimers.current.has(key)) {
+      clearTimeout(deleteTimers.current.get(key)!)
+      deleteTimers.current.delete(key)
+    }
+
+    // Optimistic UI removal
+    setMwPlants(prev => prev.filter(wp => !(wp.plant_id === plantId && wp.member_id === memberId)))
+
+    const toastId = toast(`Removed ${plantName}`, {
+      duration: 3500,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          const t = deleteTimers.current.get(key)
+          if (t) { clearTimeout(t); deleteTimers.current.delete(key) }
+          toast.dismiss(toastId)
+          fetchData() // DB row still exists — just refresh
+        },
+      },
+    })
+
+    const timer = setTimeout(async () => {
+      deleteTimers.current.delete(key)
+
+      // Delete from DB
+      const { error } = await supabase
+        .from("member_weekly_plants")
+        .delete()
+        .eq("plant_id", plantId)
+        .eq("member_id", memberId)
+        .eq("week_start", weekStart)
+
+      if (error) { await fetchData(); toast.error("Couldn't remove plant."); return }
+
+      // Update discovery record
+      const { data: disc } = await supabase
+        .from("plant_discoveries")
+        .select("id, times_eaten")
+        .eq("plant_id", plantId)
+        .eq("member_id", memberId)
+        .single()
+
+      if (disc) {
+        if (disc.times_eaten <= 1) {
+          await supabase.from("plant_discoveries").delete().eq("id", disc.id)
+        } else {
+          await supabase.from("plant_discoveries")
+            .update({ times_eaten: disc.times_eaten - 1 })
+            .eq("id", disc.id)
+        }
+      }
+      await fetchData()
+    }, 3500)
+
+    deleteTimers.current.set(key, timer)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-4 max-w-5xl mx-auto w-full">
+    <div ref={pageRef} className="flex flex-col p-3 lg:p-5 gap-6 max-w-5xl mx-auto w-full pb-24">
 
-      {/* ── Header ────────────────────────────────────────────────────────── */}
+      {/* ── Week navigation ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 shrink-0 flex-wrap">
         <Button variant="outline" size="icon" className="h-8 w-8"
-          onClick={() => setWeekStart((w) => addWeeks(w, -1))}>
+          onClick={() => setWeekStart(w => addWeeks(w, -1))}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <Button variant="outline" size="icon" className="h-8 w-8"
-          onClick={() => setWeekStart((w) => addWeeks(w, 1))}>
+          onClick={() => setWeekStart(w => addWeeks(w, 1))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -212,174 +373,544 @@ export default function PlantsPage() {
         )}
       </div>
 
-      {/* ── Progress ──────────────────────────────────────────────────────── */}
-      <div className="shrink-0 rounded-xl border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Leaf className={cn("h-5 w-5", goalReached ? "text-green-500" : "text-muted-foreground")} />
-            <span className="font-semibold text-sm">Plant diversity this week</span>
-          </div>
-          <span className={cn(
-            "text-2xl font-black tabular-nums",
-            goalReached ? "text-green-500" : "text-foreground",
-          )}>
-            {count}
-            <span className="text-sm font-normal text-muted-foreground ml-1">/ {GOAL}</span>
-          </span>
-        </div>
-        <div className="relative h-3 rounded-full bg-muted overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all duration-500",
-              goalReached ? "bg-green-500" : "bg-primary",
-            )}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        {goalReached ? (
-          <p className="text-sm font-medium text-green-600 dark:text-green-400">
-            🎉 Goal reached! Keep going!
-          </p>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            {GOAL - count} more plant{GOAL - count !== 1 ? "s" : ""} to reach the weekly goal
-          </p>
-        )}
-      </div>
+      {/* ── Summary: family plant + member progress cards ──────────────── */}
+      <div className="flex flex-col sm:flex-row gap-4">
 
-      {/* ── This week's plants ────────────────────────────────────────────── */}
-      <div className="shrink-0 rounded-xl border bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm">This week&apos;s plants</h3>
-          <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setLogOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Log a plant
-          </Button>
-        </div>
+        {/* Family plant card */}
+        <div className="rounded-2xl border-2 bg-card p-5 flex flex-col items-center gap-3 shrink-0
+          sm:w-[200px]"
+          style={{ borderColor: familyGoal ? "#22c55e" : undefined }}
+        >
+          <GrowingPlant count={familyCount} size="lg" />
 
-        {loading ? (
-          <div className="flex flex-wrap gap-2">
-            {[1,2,3,4].map((i) => <Skeleton key={i} className="h-7 w-24 rounded-full" />)}
-          </div>
-        ) : loggedPlants.length === 0 ? (
-          <p className="text-sm text-muted-foreground italic">
-            No plants logged yet this week. Hit &quot;Log a plant&quot; to start! 🌱
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {loggedPlants.map((p) => {
-              const isNew = newDiscoveries.has(p.id)
-              return (
-                <div key={p.id} className="relative">
-                  <span className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium",
-                    CATEGORY_COLORS[p.category] ?? CATEGORY_COLORS.other,
-                  )}>
-                    <span className="leading-none">{p.emoji ?? "🌿"}</span>
-                    {p.name}
-                  </span>
-                  {isNew && (
-                    <span className="absolute -top-2 -right-1 text-[10px] font-bold text-amber-500 whitespace-nowrap">
-                      First! 🎉
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── Library ───────────────────────────────────────────────────────── */}
-      <div className="flex-1 rounded-xl border bg-card p-4 space-y-3 min-h-0 overflow-auto">
-        <h3 className="font-semibold text-sm shrink-0">Plant library — tap to log</h3>
-
-        {/* Category filters */}
-        <div className="flex flex-wrap gap-1.5 shrink-0">
-          <button
-            onClick={() => setCategoryFilter(null)}
-            className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
-              !categoryFilter ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
-            )}
-          >
-            All
-          </button>
-          {ALL_CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setCategoryFilter(cat === categoryFilter ? null : cat)}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium border transition-colors",
-                categoryFilter === cat ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
-              )}
-            >
-              {CATEGORY_LABELS[cat]?.split(" ")[1] ?? cat}
-            </button>
-          ))}
-        </div>
-
-        {/* Plant grid */}
-        <div className="flex flex-wrap gap-2">
-          {filteredLibrary.map((p) => {
-            const logged = loggedPlantIds.has(p.id)
-            return (
-              <button
-                key={p.id}
-                onClick={() => quickLogPlant(p)}
+          <div className="w-full space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-bold">
+                {familyGoal ? "🌳 Goal reached!" : "🌳 Family"}
+              </span>
+              <span className={cn(
+                "text-xl font-black tabular-nums",
+                familyGoal ? "text-green-500" : "text-foreground",
+              )}>
+                {familyCount}<span className="text-xs font-normal text-muted-foreground"> / {GOAL}</span>
+              </span>
+            </div>
+            <div className="relative h-2.5 rounded-full bg-muted overflow-hidden">
+              <div
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium border-2 transition-all",
-                  logged
-                    ? cn("border-transparent", CATEGORY_COLORS[p.category] ?? CATEGORY_COLORS.other)
-                    : "border-border bg-background hover:border-primary/50 hover:bg-muted/50 text-muted-foreground",
+                  "h-full rounded-full transition-all duration-500",
+                  familyGoal ? "bg-green-500" : "bg-primary",
                 )}
-              >
-                <span className="leading-none">{p.emoji ?? "🌿"}</span>
-                {p.name}
-                {logged && <span className="text-[10px] opacity-70">✓</span>}
-              </button>
-            )
-          })}
+                style={{ width: `${familyPct}%` }}
+              />
+            </div>
+            {!familyGoal && (
+              <p className="text-[11px] text-muted-foreground text-center">
+                {GOAL - familyCount} more to reach the goal
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Member progress cards — horizontal scroll */}
+        <div className="flex-1 min-w-0">
+          {loading ? (
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {[1,2,3].map(i => <Skeleton key={i} className="h-36 w-32 rounded-2xl shrink-0" />)}
+            </div>
+          ) : members.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic py-8 text-center">
+              Add family members in Settings.
+            </p>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto pb-2 sm:flex-wrap sm:overflow-visible">
+              {members.map((m, idx) => {
+                const ids   = memberPlantIds(m.id)
+                const count = ids.size
+                const pct   = Math.min(100, Math.round((count / GOAL) * 100))
+                const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+                const goal  = count >= GOAL
+
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => scrollToMember(m.id)}
+                    className={cn(
+                      "flex flex-col items-center gap-2 rounded-2xl border-2 bg-card px-4 py-4 shrink-0",
+                      "hover:bg-muted/30 active:scale-95 transition-all cursor-pointer",
+                      "w-[120px] sm:w-[130px]",
+                      goal ? "border-green-400 dark:border-green-600" : "border-border",
+                    )}
+                  >
+                    {/* Ring with avatar in centre */}
+                    <div className="relative flex items-center justify-center">
+                      <MiniRing pct={pct} color={goal ? "#22c55e" : color} size={64} />
+                      <span className="absolute text-2xl leading-none">{m.avatar_emoji ?? "👤"}</span>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-bold leading-tight truncate max-w-[96px]"
+                        style={{ color }}>
+                        {m.name}
+                      </p>
+                      <p className={cn(
+                        "text-sm font-black tabular-nums mt-0.5",
+                        goal ? "text-green-500" : "text-foreground",
+                      )}>
+                        🌱 {count}<span className="text-xs font-normal text-muted-foreground"> / {GOAL}</span>
+                      </p>
+                      {goal && (
+                        <p className="text-[10px] font-bold text-green-500 mt-0.5">🎉 Done!</p>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Per-member sections ───────────────────────────────────────────── */}
+      {members.map((m, idx) => {
+        const ids   = memberPlantIds(m.id)
+        const count = ids.size
+        const pct   = Math.min(100, Math.round((count / GOAL) * 100))
+        const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+        const goal  = count >= GOAL
+
+        const loggedPlants = Array.from(ids)
+          .map(pid => libraryMap.get(pid))
+          .filter(Boolean) as Plant[]
+
+        return (
+          <section
+            key={m.id}
+            id={`member-section-${m.id}`}
+            className="rounded-2xl border-2 bg-card overflow-hidden"
+            style={{ borderColor: goal ? "#22c55e" : undefined }}
+          >
+            {/* Section header */}
+            <div className="flex items-center gap-3 px-5 py-4 border-b bg-muted/20">
+              <span
+                className="text-3xl leading-none p-2 rounded-full shrink-0"
+                style={{ backgroundColor: `${color}22` }}
+              >
+                {m.avatar_emoji ?? "👤"}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-lg font-bold" style={{ color }}>{m.name}</h3>
+                  {goal && <span className="text-xs font-bold text-green-500">🎉 Goal reached!</span>}
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="flex-1 relative h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%`, backgroundColor: goal ? "#22c55e" : color }}
+                    />
+                  </div>
+                  <span className={cn(
+                    "text-sm font-black tabular-nums shrink-0",
+                    goal ? "text-green-500" : "text-foreground",
+                  )}>
+                    🌱 {count} / {GOAL}
+                  </span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5"
+                onClick={() => openLog(m)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Add plant for</span>
+                <span>{m.name}</span>
+              </Button>
+            </div>
+
+            {/* Plant emoji grid */}
+            <div className="p-4">
+              {loading ? (
+                <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
+                </div>
+              ) : loggedPlants.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+                  <span className="text-4xl">🌱</span>
+                  <p className="text-sm">No plants logged yet</p>
+                  <Button size="sm" variant="outline" className="gap-1.5 mt-1"
+                    onClick={() => openLog(m)}>
+                    <Plus className="h-3.5 w-3.5" /> Add first plant
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3">
+                  {loggedPlants.map(p => (
+                    <PlantCard
+                      key={p.id}
+                      plant={p}
+                      isNew={isNew(p.id, m.id)}
+                      onDelete={() => scheduleDelete(p.id, p.name, m.id)}
+                    />
+                  ))}
+                  {/* Add more button */}
+                  <button
+                    onClick={() => openLog(m)}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed",
+                      "border-border hover:border-primary/50 hover:bg-muted/40 transition-all",
+                      "aspect-square p-2 text-muted-foreground/50 hover:text-primary",
+                    )}
+                  >
+                    <Plus className="h-5 w-5" />
+                    <span className="text-[10px] font-medium">Add</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Plant library for this member — collapsible */}
+            <MemberLibrary
+              member={m}
+              library={library}
+              loggedIds={ids}
+              onQuickLog={(plant) => quickLog(plant, m.id)}
+            />
+          </section>
+        )
+      })}
+
+      {/* ── Garden encyclopedia ───────────────────────────────────────────── */}
+      <GardenEncyclopedia
+        library={library}
+        members={members}
+        discoveries={discoveries}
+        loading={loading}
+      />
 
       {/* ── Log dialog ────────────────────────────────────────────────────── */}
-      <Dialog open={logOpen} onOpenChange={(o) => { setLogOpen(o); if (!o) setLogSelected([]) }}>
+      <Dialog
+        open={logOpen}
+        onOpenChange={o => {
+          if (!o) { setLogOpen(false); setLogPlants([]); setLogShowError(false); setLogForMember(null) }
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-base">🌱 Log plants eaten</DialogTitle>
+            <DialogTitle className="text-base">
+              {logForMember
+                ? `🌱 Add plants for ${logForMember.avatar_emoji ?? ""} ${logForMember.name}`
+                : "🌱 Log plants for the family"}
+            </DialogTitle>
             <p className="text-xs text-muted-foreground">{weekLabel(weekStart)}</p>
           </DialogHeader>
-          <div className="py-2">
+          <div className="space-y-4 py-2">
             <PlantPicker
-              selected={logSelected}
-              onAdd={(p) => setLogSelected((prev) => prev.some((x) => x.id === p.id) ? prev : [...prev, p])}
-              onRemove={(id) => setLogSelected((prev) => prev.filter((x) => x.id !== id))}
-              label=""
+              selected={logPlants}
+              onAdd={p => setLogPlants(prev => prev.some(x => x.id === p.id) ? prev : [...prev, p])}
+              onRemove={id => setLogPlants(prev => prev.filter(x => x.id !== id))}
+              label="Which plants?"
             />
+            {members.length > 0 && (
+              <MemberSelector
+                members={members}
+                selected={logMemberIds}
+                onChange={setLogMemberIds}
+                label="Who ate this?"
+                required
+                showError={logShowError}
+              />
+            )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setLogOpen(false); setLogSelected([]) }}>
+            <Button variant="outline" size="sm"
+              onClick={() => { setLogOpen(false); setLogPlants([]); setLogShowError(false) }}>
               Cancel
             </Button>
-            <Button size="sm" onClick={() => logPlants(logSelected)} disabled={logging || logSelected.length === 0}>
-              {logging ? "Saving…" : `Log ${logSelected.length > 0 ? logSelected.length : ""} plant${logSelected.length !== 1 ? "s" : ""}`}
+            <Button size="sm" onClick={submitLog}
+              disabled={logging || logPlants.length === 0 || logMemberIds.length === 0}>
+              {logging
+                ? "Saving…"
+                : `Log ${logPlants.length > 0 ? logPlants.length : ""} plant${logPlants.length !== 1 ? "s" : ""}`
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── FAB (mobile) ──────────────────────────────────────────────────── */}
+      {/* ── FAB ────────────────────────────────────────────────────────────── */}
       <button
-        onClick={() => setLogOpen(true)}
+        onClick={() => openLog(null)}
         className={cn(
           "fixed z-40 flex items-center justify-center w-14 h-14 rounded-full shadow-lg lg:hidden",
           "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all",
           "bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] right-5",
         )}
-        aria-label="Log a plant"
+        aria-label="Log plants"
       >
         <Plus className="h-6 w-6" />
       </button>
     </div>
+  )
+}
+
+// ── Plant emoji card ───────────────────────────────────────────────────────────
+
+function PlantCard({ plant, isNew, onDelete }: {
+  plant: Plant
+  isNew: boolean
+  onDelete: () => void
+}) {
+  return (
+    <div className="relative group aspect-square">
+      <div className={cn(
+        "relative flex flex-col items-center justify-center gap-1 rounded-xl p-2 h-full",
+        "border-2 border-transparent hover:border-border transition-all",
+        CATEGORY_COLORS[plant.category] ?? CATEGORY_COLORS.other,
+      )}>
+        {/* Plant emoji */}
+        <span className="text-[28px] leading-none select-none">{plant.emoji ?? "🌿"}</span>
+        {/* Plant name */}
+        <span className="text-[11px] font-semibold text-center leading-tight line-clamp-2">
+          {plant.name}
+        </span>
+
+        {/* Delete button — subtle always, prominent on hover */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className={cn(
+            "absolute top-1 right-1 rounded-full p-0.5",
+            "bg-background/60 text-muted-foreground/50",
+            "hover:bg-destructive/90 hover:text-white",
+            "opacity-30 group-hover:opacity-100 transition-all",
+          )}
+          aria-label={`Remove ${plant.name}`}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+
+      {/* NEW ribbon */}
+      {isNew && (
+        <div className="absolute -top-2 -left-1 z-10">
+          <span className="text-[9px] font-black uppercase bg-amber-400 text-amber-900
+            rounded-full px-1.5 py-0.5 shadow-sm whitespace-nowrap">
+            NEW! 🎉
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Member plant library (collapsible) ────────────────────────────────────────
+
+function MemberLibrary({ member, library, loggedIds, onQuickLog }: {
+  member: FamilyMember
+  library: Plant[]
+  loggedIds: Set<string>
+  onQuickLog: (plant: Plant) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [catFilter, setCatFilter] = useState<string | null>(null)
+
+  const filtered = catFilter ? library.filter(p => p.category === catFilter) : library
+
+  return (
+    <div className="border-t">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-3 text-sm font-medium
+          hover:bg-muted/30 transition-colors text-muted-foreground"
+      >
+        <span>Browse full plant library for {member.name}</span>
+        <span className="text-xs">{open ? "▲ Hide" : "▼ Show"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Tap to add · tap a logged plant (
+            <X className="inline h-2.5 w-2.5 align-middle" />) to remove
+          </p>
+
+          {/* Category filters */}
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setCatFilter(null)}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors",
+                !catFilter ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
+              )}
+            >All</button>
+            {ALL_CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCatFilter(cat === catFilter ? null : cat)}
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors",
+                  catFilter === cat ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
+                )}
+              >
+                {CATEGORY_LABELS[cat]?.split(" ")[1] ?? cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Plant chips grid */}
+          <div className="flex flex-wrap gap-1.5">
+            {filtered.map(p => {
+              const logged = loggedIds.has(p.id)
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onQuickLog(p)}
+                  title={logged ? `Remove ${p.name}` : `Log ${p.name}`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full text-xs font-medium",
+                    "px-2.5 py-1 border-2 transition-all",
+                    logged
+                      ? cn("border-transparent", CATEGORY_COLORS[p.category] ?? CATEGORY_COLORS.other, "hover:opacity-75")
+                      : "border-border bg-background hover:border-primary/50 hover:bg-muted/50 text-muted-foreground",
+                  )}
+                  style={logged ? {} : {}}
+                >
+                  <span className="leading-none">{p.emoji ?? "🌿"}</span>
+                  {p.name}
+                  {logged && <X className="h-2.5 w-2.5 opacity-60" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Garden Encyclopedia ────────────────────────────────────────────────────────
+
+function GardenEncyclopedia({ library, members, discoveries, loading }: {
+  library: Plant[]
+  members: FamilyMember[]
+  discoveries: PlantDiscovery[]
+  loading: boolean
+}) {
+  const [catFilter, setCatFilter] = useState<string | null>(null)
+
+  const discoveredIds = new Set(discoveries.map(d => d.plant_id))
+  const discovered    = library.filter(p => discoveredIds.has(p.id))
+  const sorted        = [...discovered].sort((a, b) => {
+    const ac = discoveries.filter(d => d.plant_id === a.id).length
+    const bc = discoveries.filter(d => d.plant_id === b.id).length
+    return bc !== ac ? bc - ac : a.name.localeCompare(b.name)
+  })
+  const filtered = catFilter ? sorted.filter(p => p.category === catFilter) : sorted
+
+  if (loading) return (
+    <section className="rounded-2xl border-2 border-border bg-card p-5 space-y-3">
+      <Skeleton className="h-6 w-40 rounded" />
+      {[1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
+    </section>
+  )
+
+  return (
+    <section className="rounded-2xl border-2 border-border bg-card overflow-hidden" id="garden-encyclopedia">
+      <div className="px-5 py-4 border-b bg-muted/20">
+        <h2 className="text-base font-bold">🌿 Our Garden</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Every plant the family has ever tried — {discovered.length} discovered
+        </p>
+      </div>
+
+      {discovered.length === 0 ? (
+        <div className="flex flex-col items-center py-16 gap-3 text-muted-foreground">
+          <span className="text-5xl">🌱</span>
+          <p className="text-sm font-medium">The garden is empty</p>
+          <p className="text-xs text-center opacity-70">
+            Start logging plants to grow your family&apos;s garden!
+          </p>
+        </div>
+      ) : (
+        <div className="p-5 space-y-4">
+          {/* Category filters */}
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setCatFilter(null)}
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors",
+                !catFilter ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
+              )}
+            >All</button>
+            {ALL_CATEGORIES.map(cat => (
+              <button key={cat}
+                onClick={() => setCatFilter(cat === catFilter ? null : cat)}
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 text-xs font-medium border transition-colors",
+                  catFilter === cat ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted",
+                )}
+              >
+                {CATEGORY_LABELS[cat]?.split(" ")[1] ?? cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {filtered.map(plant => {
+              const plantDiscs = discoveries.filter(d => d.plant_id === plant.id)
+              return (
+                <div key={plant.id} className="rounded-xl border bg-background px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl leading-none shrink-0">{plant.emoji ?? "🌿"}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm leading-tight">{plant.name}</p>
+                      <span className={cn(
+                        "text-[10px] font-semibold uppercase tracking-wider rounded-full px-1.5 py-0.5",
+                        CATEGORY_COLORS[plant.category] ?? CATEGORY_COLORS.other,
+                      )}>
+                        {plant.category}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {plantDiscs.length}/{members.length} tried
+                    </span>
+                  </div>
+
+                  {/* Per-member breakdown */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {members.map((m, idx) => {
+                      const disc  = plantDiscs.find(d => d.member_id === m.id)
+                      const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+                      return (
+                        <div
+                          key={m.id}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border",
+                            !disc && "border-dashed border-border/40 text-muted-foreground/30",
+                          )}
+                          style={disc ? { color, borderColor: color, backgroundColor: `${color}15` } : undefined}
+                        >
+                          <span className="leading-none">{m.avatar_emoji ?? "👤"}</span>
+                          <span>{m.name}</span>
+                          {disc && (
+                            <span className="opacity-60 text-[10px]">
+                              {new Date(disc.first_eaten_date + "T00:00:00").toLocaleDateString("en-AU", {
+                                day: "numeric", month: "short",
+                              })}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </section>
   )
 }

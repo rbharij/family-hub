@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Loader2 } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -16,6 +16,7 @@ import {
   type Meal, type MealType,
 } from "./_utils"
 import { PlantPicker, type Plant } from "@/app/plants/_plant-picker"
+import { MemberSelector, type FamilyMember } from "@/app/plants/_member-selector"
 
 // ── Props ──────────────────────────────────────────────────────────────────────
 
@@ -36,29 +37,84 @@ interface MealEditorProps {
 export function MealEditor({
   open, onClose, onSaved, meal, date, dayIndex, mealType, forMemberId, forMemberName,
 }: MealEditorProps) {
-  const [title, setTitle]       = useState("")
-  const [notes, setNotes]       = useState("")
+  const [title, setTitle]             = useState("")
+  const [notes, setNotes]             = useState("")
   const [schoolLunch, setSchoolLunch] = useState(false)
-  const [saving, setSaving]   = useState(false)
-  const [clearing, setClearing] = useState(false)
-  const [error, setError]     = useState<string | null>(null)
+  const [saving, setSaving]           = useState(false)
+  const [clearing, setClearing]       = useState(false)
+  const [error, setError]             = useState<string | null>(null)
   const [selectedPlants, setSelectedPlants] = useState<Plant[]>([])
+  const [members, setMembers]         = useState<FamilyMember[]>([])
+  const [eaterIds, setEaterIds]       = useState<string[]>([])
 
-  const supabase = createClient()
-
-  // Reset on open
+  const supabase = useRef(createClient()).current
   const SCHOOL_LUNCH = "School Lunch"
 
+  // ── Load family members once on mount ─────────────────────────────────────
+
   useEffect(() => {
-    if (open) {
-      const isSchool = meal?.title === SCHOOL_LUNCH
-      setSchoolLunch(isSchool)
-      setTitle(isSchool ? "" : (meal?.title ?? ""))
-      setNotes(meal?.notes ?? "")
-      setError(null)
+    supabase
+      .from("family_members")
+      .select("id, name, avatar_emoji, color")
+      .order("created_at")
+      .then(({ data }) => setMembers((data ?? []) as FamilyMember[]))
+  }, [supabase])
+
+  // ── Reset on open ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!open) return
+    const isSchool = meal?.title === SCHOOL_LUNCH
+    setSchoolLunch(isSchool)
+    setTitle(isSchool ? "" : (meal?.title ?? ""))
+    setNotes(meal?.notes ?? "")
+    setError(null)
+
+    if (meal?.id) {
+      // Load plants already logged for this meal
+      supabase
+        .from("member_weekly_plants")
+        .select("plant_id, plants!inner(id, name, emoji, category)")
+        .eq("meal_id", meal.id)
+        .then(({ data }) => {
+          if (!data) { setSelectedPlants([]); return }
+          // Deduplicate by plant_id (multiple members may share the same plant)
+          const seen = new Set<string>()
+          const plants: Plant[] = []
+          for (const row of data) {
+            const p = row.plants as unknown as Plant
+            if (p && !seen.has(p.id)) {
+              seen.add(p.id)
+              plants.push({ ...p, times_eaten: 0, first_eaten_date: null })
+            }
+          }
+          setSelectedPlants(plants)
+        })
+    } else {
       setSelectedPlants([])
     }
-  }, [open, meal])
+  }, [open, meal, supabase])
+
+  // Apply default eater selection whenever members list or open state changes.
+  // For existing meals: pre-select whoever already has plants logged for it.
+  // For new meals: lunchbox → just that child; dinner/breakfast → all members.
+  useEffect(() => {
+    if (!open || members.length === 0) return
+    if (meal?.id) {
+      supabase
+        .from("member_weekly_plants")
+        .select("member_id")
+        .eq("meal_id", meal.id)
+        .then(({ data }) => {
+          const ids = Array.from(new Set((data ?? []).map((r) => r.member_id)))
+          setEaterIds(ids.length > 0 ? ids : forMemberId ? [forMemberId] : members.map((m) => m.id))
+        })
+    } else if (forMemberId) {
+      setEaterIds([forMemberId])
+    } else {
+      setEaterIds(members.map((m) => m.id))
+    }
+  }, [open, meal, members, forMemberId, supabase])
 
   // ── Week start helper ──────────────────────────────────────────────────────
 
@@ -75,6 +131,9 @@ export function MealEditor({
 
   async function handleSave() {
     if (!schoolLunch && !title.trim()) { setError("Please enter a meal title."); return }
+    if (selectedPlants.length > 0 && eaterIds.length === 0) {
+      setError("Please select who ate these plants."); return
+    }
     setSaving(true); setError(null)
     try {
       const payload = {
@@ -96,16 +155,19 @@ export function MealEditor({
         mealId = newMeal?.id ?? null
       }
 
-      // Log any selected plants for the week
-      if (selectedPlants.length > 0) {
+      // Log plants per member
+      if (selectedPlants.length > 0 && eaterIds.length > 0) {
         const weekStart = mealWeekStart()
         for (const plant of selectedPlants) {
-          await supabase.rpc("log_plant_for_week", {
-            p_plant_id:   plant.id,
-            p_week_start: weekStart,
-            p_added_by:   "meal",
-            p_meal_id:    mealId,
-          })
+          for (const memberId of eaterIds) {
+            await supabase.rpc("log_plant_for_member", {
+              p_plant_id:   plant.id,
+              p_member_id:  memberId,
+              p_week_start: weekStart,
+              p_added_by:   "meal",
+              p_meal_id:    mealId,
+            })
+          }
         }
       }
 
@@ -194,11 +256,23 @@ export function MealEditor({
             />
           </div>
 
+          {/* Plant picker */}
           <PlantPicker
             selected={selectedPlants}
             onAdd={(p) => setSelectedPlants((prev) => prev.some((x) => x.id === p.id) ? prev : [...prev, p])}
             onRemove={(id) => setSelectedPlants((prev) => prev.filter((x) => x.id !== id))}
           />
+
+          {/* Member selector — only shown when plants are selected */}
+          {selectedPlants.length > 0 && members.length > 0 && (
+            <MemberSelector
+              members={members}
+              selected={eaterIds}
+              onChange={setEaterIds}
+              label="Who ate these plants?"
+              required
+            />
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

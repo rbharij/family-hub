@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
+import { GrowingPlant } from "@/app/plants/_growing-plant"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
 const WALL_TABLES = [
@@ -17,6 +18,7 @@ const WALL_TABLES = [
   { table: "meals" },
   { table: "messages" },
   { table: "birthdays" },
+  { table: "member_weekly_plants" },
 ] as const
 
 // ── Local types ────────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ interface WallMessage {
 
 interface BirthdayRow { id:string; name:string; date:string; type:"birthday"|"anniversary"; color:string }
 interface WallChoreStreak { member_id: string; streak_count: number; longest_streak: number }
+interface WallMemberPlant { plant_id: string; member_id: string }
 
 interface Weather {
   temp: number          // °C
@@ -193,6 +196,7 @@ export default function WallPage() {
   const [wallMessages, setWallMessages]       = useState<WallMessage[]>([])
   const [wallMsgFilter, setWallMsgFilter]     = useState<Set<string>>(new Set())
   const [choreStreaks, setChoreStreaks]        = useState<Map<string, WallChoreStreak>>(new Map())
+  const [wallMemberPlants, setWallMemberPlants] = useState<WallMemberPlant[]>([])
 
   // ── Clock tick ─────────────────────────────────────────────────────────────
 
@@ -211,7 +215,14 @@ export default function WallPage() {
     const todayStr    = toDateStr(today)
     const tomorrowStr = toDateStr(tomorrow)
 
-    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes, bdRes, streaksRes] = await Promise.all([
+    // Compute Monday of current week for weekly_plants query
+    const weekMonday = new Date(today)
+    const wdOffset = (weekMonday.getDay() + 6) % 7
+    weekMonday.setDate(weekMonday.getDate() - wdOffset)
+    const pad2 = (n: number) => String(n).padStart(2, "0")
+    const weekMondayStr = `${weekMonday.getFullYear()}-${pad2(weekMonday.getMonth() + 1)}-${pad2(weekMonday.getDate())}`
+
+    const [eventsRes, membersRes, choresRes, mealsRes, msgsRes, bdRes, streaksRes, wpRes] = await Promise.all([
       supabase
         .from("events")
         .select("id, title, start_at, end_at, color")
@@ -241,6 +252,10 @@ export default function WallPage() {
       supabase
         .from("chore_streaks")
         .select("member_id, streak_count, longest_streak"),
+      supabase
+        .from("member_weekly_plants")
+        .select("plant_id, member_id")
+        .eq("week_start", weekMondayStr),
     ])
 
     setEvents(eventsRes.data ?? [])
@@ -250,6 +265,9 @@ export default function WallPage() {
       streakMap.set(row.member_id, row)
     }
     setChoreStreaks(streakMap)
+
+    // Build wall member plants
+    setWallMemberPlants((wpRes.data ?? []) as WallMemberPlant[])
     const memberList = membersRes.data ?? []
     setMembers(memberList)
     // Initialise wall message filter to all members on first load
@@ -563,6 +581,58 @@ export default function WallPage() {
             </div>
 
           </div>
+
+          {/* Plant strip */}
+          {(() => {
+            const familyTotal = new Set(wallMemberPlants.map((wp) => wp.plant_id)).size
+            if (familyTotal === 0) return null
+            const familyGoal = familyTotal >= 30
+            return (
+              <div className="shrink-0 border-t bg-muted/20 px-4 py-2">
+                <div className="flex items-center gap-4">
+                  {/* Animated growing plant SVG */}
+                  <div className="shrink-0">
+                    <GrowingPlant count={familyTotal} size="sm" />
+                  </div>
+
+                  {/* Right side: family label + per-member counts */}
+                  <div className="flex flex-col gap-1.5 min-w-0">
+                    {/* Family total */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn(
+                        "text-lg font-black tabular-nums leading-none",
+                        familyGoal ? "text-green-500" : "text-foreground",
+                      )}>
+                        {familyGoal ? "🌳 Goal reached!" : `🌿 Family: ${familyTotal} / 30`}
+                      </span>
+                    </div>
+
+                    {/* Per-member mini counts */}
+                    {members.length > 0 && (
+                      <div className="flex items-center gap-3 flex-wrap">
+                        {members.map((m) => {
+                          const memberCount = new Set(
+                            wallMemberPlants.filter((wp) => wp.member_id === m.id).map((wp) => wp.plant_id)
+                          ).size
+                          if (memberCount === 0) return null
+                          const memberGoal = memberCount >= 30
+                          return (
+                            <span key={m.id} className={cn(
+                              "inline-flex items-center gap-1 text-base font-bold tabular-nums",
+                              memberGoal ? "text-green-500" : "text-muted-foreground",
+                            )}>
+                              {m.avatar_emoji ?? "👤"} {memberCount}
+                              {memberGoal && <span className="text-sm">✨</span>}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </section>
         </ErrorBoundary>
 
