@@ -464,20 +464,9 @@ function DayColumn({
           )}
         </div>
         {dayPlants && dayPlants.count > 0 && (
-          <div className={cn(
-            "flex items-center gap-1 mt-0.5 flex-wrap",
-            isToday ? "opacity-90" : "",
-          )}>
-            <span className="text-[10px] font-semibold opacity-70">🌿</span>
-            {dayPlants.plants.slice(0, 4).map((p, i) => (
-              <span key={i} className="text-sm leading-none" title={p.name}>
-                {p.emoji ?? "🌿"}
-              </span>
-            ))}
-            {dayPlants.count > 4 && (
-              <span className="text-[10px] font-medium opacity-70">+{dayPlants.count - 4}</span>
-            )}
-          </div>
+          <p className="text-[10px] font-semibold mt-0.5 opacity-70">
+            {dayPlants.count} plant{dayPlants.count !== 1 ? "s" : ""}
+          </p>
         )}
       </div>
 
