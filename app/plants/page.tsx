@@ -51,7 +51,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   nut:       "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
   seed:      "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300",
   legume:    "bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-300",
-  grain:     "bg-stone-100 text-stone-800 dark:bg-stone-900/40 dark:text-stone-300",
+  grain:     "bg-amber-50 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200",
   other:     "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
 }
 
