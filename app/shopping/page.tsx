@@ -458,9 +458,7 @@ function ListPanel({
             className="h-10"
           />
           <DialogFooter className="gap-2">
-            <DialogClose asChild>
-              <Button variant="outline" size="sm">Cancel</Button>
-            </DialogClose>
+            <DialogClose>Cancel</DialogClose>
             <Button
               size="sm"
               onClick={commitRename}
@@ -483,9 +481,7 @@ function ListPanel({
             <strong>{list.name}</strong>. This cannot be undone.
           </p>
           <DialogFooter className="gap-2">
-            <DialogClose asChild>
-              <Button variant="outline" size="sm">Cancel</Button>
-            </DialogClose>
+            <DialogClose>Cancel</DialogClose>
             <Button variant="destructive" size="sm" onClick={() => { onClearAll(); setClearAllOpen(false) }}>
               Clear all
             </Button>
