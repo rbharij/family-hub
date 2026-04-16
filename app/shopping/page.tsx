@@ -81,11 +81,25 @@ export default function ShoppingPage() {
   // ── Fetch ─────────────────────────────────────────────────────────────────
 
   const fetchLists = useCallback(async () => {
-    const { data } = await supabase
+    // Try with display_order; fall back gracefully if the migration hasn't run yet
+    const primary = await supabase
       .from("shopping_lists")
       .select("id, name, display_order")
       .order("display_order", { ascending: true, nullsFirst: true })
-    const loaded = (data ?? []) as ShoppingList[]
+
+    let loaded: ShoppingList[]
+    if (primary.error || !primary.data) {
+      // display_order column missing — fetch without it
+      const fallback = await supabase
+        .from("shopping_lists")
+        .select("id, name")
+        .order("created_at", { ascending: true })
+      loaded = ((fallback.data ?? []) as { id: string; name: string }[])
+        .map((l, i) => ({ ...l, display_order: i + 1 }))
+    } else {
+      loaded = primary.data as ShoppingList[]
+    }
+
     setLists(loaded)
     setActiveTab(prev =>
       prev && loaded.some(l => l.id === prev) ? prev : (loaded[0]?.id ?? ""),
@@ -530,29 +544,23 @@ export default function ShoppingPage() {
       </div>
 
       {/* ── Tab panels ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-hidden relative">
-        {lists.map(list => (
-          <div
-            key={list.id}
-            className={cn(
-              "absolute inset-0 flex flex-col",
-              activeTab !== list.id && "hidden",
-            )}
-          >
-            <ErrorBoundary label={`${list.name} list`}>
-              <ListPanel
-                list={list}
-                items={itemsForList(list.id)}
-                loading={loading}
-                onAdd={(n, q) => addItem(list.id, n, q)}
-                onToggle={toggleItem}
-                onDelete={deleteItem}
-                onUpdate={updateItem}
-                onClearCompleted={() => clearCompleted(list.id)}
-                onClearAll={() => clearAll(list.id, list.name)}
-              />
-            </ErrorBoundary>
-          </div>
+      {/* Render only the active panel — avoids absolute-positioning collapsing
+          the container to 0 height on mobile (where there is no h-full). */}
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+        {lists.map(list => list.id === activeTab && (
+          <ErrorBoundary key={list.id} label={`${list.name} list`}>
+            <ListPanel
+              list={list}
+              items={itemsForList(list.id)}
+              loading={loading}
+              onAdd={(n, q) => addItem(list.id, n, q)}
+              onToggle={toggleItem}
+              onDelete={deleteItem}
+              onUpdate={updateItem}
+              onClearCompleted={() => clearCompleted(list.id)}
+              onClearAll={() => clearAll(list.id, list.name)}
+            />
+          </ErrorBoundary>
         ))}
       </div>
 
