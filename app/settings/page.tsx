@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   RefreshCw, Loader2, Plus, Pencil, Trash2, Check, X,
-  Users, Palette, CalendarSync, Home,
+  Users, Palette, CalendarSync, Home, Tv2,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,8 @@ import {
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { useAppSettings } from "@/lib/app-settings-context"
+import { useIdleTimeout } from "@/lib/idle-timeout-context"
+import { Switch } from "@/components/ui/switch"
 import { useTheme } from "@/components/theme-provider"
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ const defaultForm = (): MemberForm => ({
 export default function SettingsPage() {
   const { settings, updateSettings } = useAppSettings()
   const { darkFromHour, lightFromHour, updateThemeHours } = useTheme()
+  const { enabled: idleEnabled, timeoutMs: idleTimeoutMs, setEnabled: setIdleEnabled, setTimeoutMs: setIdleTimeoutMs } = useIdleTimeout()
 
   // Family name
   const [familyName, setFamilyName] = useState(settings?.familyName ?? "Family Hub")
@@ -470,6 +473,42 @@ export default function SettingsPage() {
           {savingHours ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
           Save schedule
         </Button>
+      </section>
+
+      {/* ── Wall display ─────────────────────────────────────────────────── */}
+      <section className="space-y-4">
+        <SectionHeader icon={<Tv2 className="h-4 w-4" />} title="Wall display" />
+
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium">Auto wall display after idle</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Automatically switches to wall display when the screen is idle
+            </p>
+          </div>
+          <Switch
+            checked={idleEnabled}
+            onCheckedChange={setIdleEnabled}
+          />
+        </div>
+
+        {idleEnabled && (
+          <div className="space-y-1.5">
+            <Label htmlFor="idle-timeout-duration">Switch after</Label>
+            <select
+              id="idle-timeout-duration"
+              value={idleTimeoutMs}
+              onChange={(e) => setIdleTimeoutMs(Number(e.target.value))}
+              className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-40"
+            >
+              <option value={120000}>2 minutes</option>
+              <option value={300000}>5 minutes</option>
+              <option value={600000}>10 minutes</option>
+              <option value={900000}>15 minutes</option>
+              <option value={1800000}>30 minutes</option>
+            </select>
+          </div>
+        )}
       </section>
 
       {/* ── Google Calendar ───────────────────────────────────────────────── */}

@@ -9,6 +9,7 @@ import { SetupWizard } from "@/components/setup-wizard"
 import { TopBar } from "@/components/top-bar"
 import { TopNavTabs, BottomNavTabs } from "@/components/nav-tabs"
 import { Toaster } from "@/components/ui/sonner"
+import { IdleTimeoutProvider } from "@/lib/idle-timeout-context"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -56,6 +57,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ConnectionStatusProvider>
             <AppSettingsProvider>
+              <IdleTimeoutProvider>
               <MessageCountProvider>
               {/*
                 Desktop (lg+): fixed-height shell — top bar + nav tabs + scrollable content.
@@ -73,6 +75,7 @@ export default function RootLayout({
               <SetupWizard />
               <Toaster position="top-center" richColors closeButton />
               </MessageCountProvider>
+              </IdleTimeoutProvider>
             </AppSettingsProvider>
           </ConnectionStatusProvider>
         </ThemeProvider>
