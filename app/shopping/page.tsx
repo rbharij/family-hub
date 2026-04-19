@@ -499,13 +499,13 @@ export default function ShoppingPage() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="min-w-[120px]">
                         <DropdownMenuItem
-                          onSelect={tabMenuSelect(list.id, () => startRename(list))}
+                          onClick={tabMenuSelect(list.id, () => startRename(list))}
                         >
                           Rename
                         </DropdownMenuItem>
                         {lists.length > 1 && (
                           <DropdownMenuItem
-                            onSelect={tabMenuSelect(list.id, () => setPendingDelete(list))}
+                            onClick={tabMenuSelect(list.id, () => setPendingDelete(list))}
                             className="text-destructive focus:text-destructive"
                           >
                             Delete

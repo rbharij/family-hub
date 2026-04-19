@@ -692,12 +692,20 @@ export default function WallPage() {
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col items-center gap-4">
             {(() => {
-              const familyTotal = new Set(wallMemberPlants.map((wp) => wp.plant_id)).size
-              const familyGoal  = familyTotal >= 30
+              // Match the plants tab: sum of each member's unique plant count
+              const familyCount = members.reduce((sum, m) =>
+                sum + new Set(wallMemberPlants.filter((wp) => wp.member_id === m.id).map((wp) => wp.plant_id)).size
+              , 0)
+              const familyMax  = members.length * 30
+              const familyGoal = members.length > 0 && members.every((m) =>
+                new Set(wallMemberPlants.filter((wp) => wp.member_id === m.id).map((wp) => wp.plant_id)).size >= 30
+              )
+              const familyPct          = familyMax > 0 ? Math.min(100, Math.round((familyCount / familyMax) * 100)) : 0
+              const growingPlantCount  = familyGoal ? 30 : Math.floor((familyPct / 100) * 30)
               return (
                 <>
                   {/* Animated growing plant */}
-                  <GrowingPlant count={familyTotal} size="sm" />
+                  <GrowingPlant count={growingPlantCount} size="sm" />
 
                   {/* Family total */}
                   <div className="text-center">
@@ -705,8 +713,8 @@ export default function WallPage() {
                       "text-2xl font-black tabular-nums leading-none",
                       familyGoal ? "text-green-500" : "text-foreground",
                     )}>
-                      {familyTotal}
-                      <span className="text-base font-semibold text-muted-foreground"> / 30</span>
+                      {familyCount}
+                      <span className="text-base font-semibold text-muted-foreground"> / {familyMax}</span>
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       {familyGoal ? "🌳 Goal reached!" : "family plants"}
@@ -750,7 +758,7 @@ export default function WallPage() {
                     </div>
                   )}
 
-                  {familyTotal === 0 && (
+                  {familyCount === 0 && (
                     <p className="text-sm text-muted-foreground text-center italic mt-2">
                       No plants logged this week
                     </p>
