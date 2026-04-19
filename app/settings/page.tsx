@@ -313,13 +313,15 @@ export default function SettingsPage() {
     setSyncing(true)
     try {
       const res = await fetch("/api/google-calendar/sync")
-      if (!res.ok) throw new Error("Sync failed")
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body?.error ?? "Sync failed")
       const ts = Date.now()
       localStorage.setItem("google-calendar-last-sync", String(ts))
       setLastSynced(ts)
       toast.success("Google Calendar synced")
-    } catch {
-      toast.error("Sync failed. Check your Google Calendar credentials.")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Sync failed"
+      toast.error(msg, { description: "Check the server logs for details." })
     } finally {
       setSyncing(false)
     }

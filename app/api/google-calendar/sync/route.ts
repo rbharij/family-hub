@@ -6,8 +6,9 @@ export async function GET() {
     const result = await syncGoogleCalendar()
     return NextResponse.json(result)
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error"
-    console.error("[google-calendar/sync]", message)
+    // Log the full error object so the real Google API error is visible in server logs
+    console.error("[google-calendar/sync] full error:", err)
+    const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
