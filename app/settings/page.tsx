@@ -625,7 +625,7 @@ export default function SettingsPage() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {members.find((m) => m.id === deletingId)?.name} will be removed.
-            Their chores will become unassigned.
+            Their tasks will become unassigned.
           </p>
           <DialogFooter className="gap-2">
             <DialogClose>

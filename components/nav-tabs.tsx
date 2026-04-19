@@ -8,7 +8,7 @@ import { useMessageCount } from "@/lib/message-count-context"
 
 const MAIN_TABS = [
   { name: "Calendar", href: "/calendar",  icon: Calendar },
-  { name: "Chores",   href: "/chores",    icon: ClipboardList },
+  { name: "Tasks",    href: "/chores",    icon: ClipboardList },
   { name: "Shopping", href: "/shopping",  icon: ShoppingCart },
   { name: "Meals",    href: "/meals",     icon: UtensilsCrossed },
   { name: "Plants",   href: "/plants",    icon: Sprout },

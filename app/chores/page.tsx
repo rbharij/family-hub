@@ -210,7 +210,7 @@ export default function ChoresPage() {
     if (error) {
       // Revert optimistic update
       setChores((prev) => prev.map((c) => c.id === chore.id ? chore : c))
-      toast.error("Couldn't update chore. Please try again.")
+      toast.error("Couldn't update task. Please try again.")
     } else if (completed && chore.assigned_to && chore.due_date) {
       // Fire-and-forget streak update; re-fetch streak state afterwards
       supabase.rpc("update_chore_streak", {
@@ -416,9 +416,9 @@ export default function ChoresPage() {
         ) : mobileMemberGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
             <CalendarDays className="h-10 w-10 opacity-30" />
-            <p className="text-sm">No chores {isMobileToday ? "today" : "this day"}</p>
+            <p className="text-sm">No tasks {isMobileToday ? "today" : "this day"}</p>
             <Button size="sm" variant="outline" onClick={() => openCreate(mobileDateStr)}>
-              Add a chore
+              Add a task
             </Button>
           </div>
         ) : (
@@ -471,7 +471,7 @@ export default function ChoresPage() {
       </div>
 
       {/* ── Desktop Grid ──────────────────────────────────────────────────── */}
-      <ErrorBoundary label="Chores grid">
+      <ErrorBoundary label="Tasks grid">
       <div className="hidden lg:flex flex-1 overflow-auto rounded-lg border bg-background">
         <table className="w-full min-w-[640px] border-collapse table-fixed">
           {/* Column headers */}
@@ -587,7 +587,7 @@ export default function ChoresPage() {
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
                     <ClipboardList className="h-10 w-10 opacity-30" />
                     <p className="text-sm font-medium">No family members yet</p>
-                    <p className="text-xs">Add members in Settings to start tracking chores.</p>
+                    <p className="text-xs">Add members in Settings to start tracking tasks.</p>
                   </div>
                 </td>
               </tr>
@@ -611,7 +611,7 @@ export default function ChoresPage() {
           "bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] right-5",
           "lg:bottom-6 lg:right-6",
         )}
-        aria-label="Add chore"
+        aria-label="Add task"
       >
         <Plus className="h-6 w-6" />
       </button>
@@ -639,7 +639,7 @@ export default function ChoresPage() {
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete chore?</DialogTitle>
+            <DialogTitle>Delete task?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             &ldquo;{deleteTarget?.title}&rdquo;
@@ -649,7 +649,7 @@ export default function ChoresPage() {
             {deleteTarget?.recur_series_id ? (
               <>
                 <Button variant="outline" size="sm" onClick={() => handleDelete("this")} disabled={deleting}>
-                  Delete this chore only
+                  Delete this task only
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => handleDelete("future")} disabled={deleting}>
                   Delete this + all future

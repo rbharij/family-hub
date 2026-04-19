@@ -125,7 +125,7 @@ export function ChoreSheet({
   async function handleSave() {
     if (!form.title.trim()) { setError("Title is required."); return }
     if (form.is_recurring && form.recur_days.length === 0) {
-      setError("Select at least one day for recurring chores."); return
+      setError("Select at least one day for recurring tasks."); return
     }
     setSaving(true)
     setError(null)
@@ -223,7 +223,7 @@ export function ChoreSheet({
       <SheetContent side="right" className="flex flex-col gap-0 p-0 w-full sm:max-w-md">
         <SheetHeader className="px-5 py-4 border-b shrink-0">
           <SheetTitle className="flex items-center gap-2">
-            {isEdit ? "Edit Chore" : "New Chore"}
+            {isEdit ? "Edit Task" : "New Task"}
             {isSeries && (
               <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground border rounded-full px-2 py-0.5">
                 <RefreshCw className="h-3 w-3" /> Recurring
@@ -259,7 +259,7 @@ export function ChoreSheet({
                     />
                     <div>
                       <p className="text-sm font-medium">
-                        {scope === "this" ? "This chore only" : "This and all future chores"}
+                        {scope === "this" ? "This task only" : "This and all future tasks"}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {scope === "this"
@@ -343,7 +343,7 @@ export function ChoreSheet({
                 onCheckedChange={(v) => field("is_recurring", v)}
               />
               <Label htmlFor="chore-recurring" className="cursor-pointer">
-                Recurring chore
+                Recurring task
               </Label>
             </div>
           )}
@@ -376,7 +376,7 @@ export function ChoreSheet({
 
               {form.recur_days.length > 0 && (
                 <div className="rounded-lg bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{expandedCount} chores</span>
+                  <span className="font-medium text-foreground">{expandedCount} tasks</span>
                   {" "}will be created over the next 8 weeks on{" "}
                   <span className="font-medium text-foreground">
                     {form.recur_days
@@ -413,7 +413,7 @@ export function ChoreSheet({
             {isEdit
               ? "Save"
               : form.is_recurring && expandedCount > 0
-              ? `Create (${expandedCount} chores)`
+              ? `Create (${expandedCount} tasks)`
               : "Create"}
           </Button>
         </div>

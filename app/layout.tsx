@@ -15,7 +15,7 @@ const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Family Hub",
-  description: "Your family's central hub for calendars, chores, shopping, and meals",
+  description: "Your family's central hub for calendars, tasks, shopping, and meals",
 }
 
 export default function RootLayout({

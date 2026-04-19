@@ -307,7 +307,7 @@ export default function WallPage() {
       .eq("id", chore.id)
     if (error) {
       setChores((prev) => prev.map((c) => c.id === chore.id ? chore : c))
-      toast.error("Couldn't update chore.")
+      toast.error("Couldn't update task.")
     }
   }
 
@@ -445,14 +445,14 @@ export default function WallPage() {
         </ErrorBoundary>
 
         {/* ── Top Right: Today's Chores ──────────────────────────────────── */}
-        <ErrorBoundary label="Today's chores">
+        <ErrorBoundary label="Today's tasks">
         <section className="border-b flex flex-col overflow-hidden">
           <div className="shrink-0 px-6 pt-5 pb-3 border-b bg-muted/30">
-            <h2 className="text-[28px] font-bold leading-none">✅ Today&apos;s Chores</h2>
+            <h2 className="text-[28px] font-bold leading-none">✅ Today&apos;s Tasks</h2>
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
             {chores.length === 0 ? (
-              <p className="text-xl text-muted-foreground italic mt-2">No chores today</p>
+              <p className="text-xl text-muted-foreground italic mt-2">No tasks today</p>
             ) : (
               choreGroups.map(({ member, key, items }) => (
                 <div key={key}>

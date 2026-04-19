@@ -204,7 +204,7 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
 
       {/* ── Print-only header ────────────────────────────────────────────── */}
       <div className="hidden print:block px-8 pt-6 pb-4 border-b">
-        <h1 className="text-2xl font-bold">Weekly Chores Summary</h1>
+        <h1 className="text-2xl font-bold">Weekly Tasks Summary</h1>
         <p className="text-base text-gray-500">{formatWeekLabel(weekStart)}</p>
       </div>
 
@@ -239,7 +239,7 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
         ) : summaries.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 gap-3 text-muted-foreground">
             <span className="text-5xl">🗓️</span>
-            <p className="text-xl font-medium">No chores assigned this week</p>
+            <p className="text-xl font-medium">No tasks assigned this week</p>
           </div>
         ) : (
           <div className={cn(
