@@ -224,6 +224,7 @@ export default function ShoppingPage() {
       .select("id, name, display_order")
       .single()
     if (error || !data) {
+      console.error("[shopping] create list error:", error)
       toast.error("Couldn't create list.")
     } else {
       const newList = data as ShoppingList
