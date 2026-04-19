@@ -29,6 +29,7 @@ interface CalEvent {
   title: string
   start_at: string
   end_at: string | null
+  is_all_day: boolean
   color: string | null
 }
 
@@ -136,8 +137,12 @@ export default function WallPage() {
     const weekMondayStr = `${weekMonday.getFullYear()}-${p2(weekMonday.getMonth()+1)}-${p2(weekMonday.getDate())}`
 
     const [evRes, memRes, ctRes, cmRes, mealRes, msgRes, bdRes, strRes, wpRes] = await Promise.all([
-      supabase.from("events").select("id,title,start_at,end_at,color")
-        .gte("start_at", today.toISOString()).lt("start_at", weekEnd.toISOString()).order("start_at"),
+      // Look back 30 days so multi-day events that started before today are included,
+      // then filter in JS to events that still overlap with the current week.
+      supabase.from("events").select("id,title,start_at,end_at,is_all_day,color")
+        .gte("start_at", addDays(today, -30).toISOString())
+        .lt("start_at", weekEnd.toISOString())
+        .order("start_at"),
       supabase.from("family_members").select("id,name,avatar_emoji,color").order("created_at"),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", todayStr),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", tomorrowStr),
@@ -149,7 +154,12 @@ export default function WallPage() {
       supabase.from("member_weekly_plants").select("plant_id,member_id").eq("week_start", weekMondayStr),
     ])
 
-    setEvents(evRes.data ?? [])
+    // Keep only events that end on or after today (catches multi-day events in progress)
+    const allEvents = (evRes.data ?? []) as CalEvent[]
+    setEvents(allEvents.filter(ev => {
+      const evEnd = ev.end_at ? new Date(ev.end_at) : new Date(ev.start_at)
+      return evEnd >= today
+    }))
     setBirthdays(bdRes.data ?? [])
     setMembers(memRes.data ?? [])
     setChoresToday(ctRes.data ?? [])
@@ -169,6 +179,8 @@ export default function WallPage() {
   }, [supabase])
 
   useEffect(() => {
+    // Trigger a background Google Calendar sync so the wall always shows fresh events
+    fetch("/api/google-calendar/sync").catch(() => {/* ignore — wall still shows DB data */})
     fetchAll()
     const id = setInterval(fetchAll, 60_000)
     return () => clearInterval(id)
@@ -596,7 +608,7 @@ function CalendarSection({
       id: ev.id,
       title: ev.title,
       chip: dayChip(d, todayStr),
-      time: ev.end_at
+      time: ev.is_all_day ? null : ev.end_at
         ? `${fmtTime(ev.start_at)} – ${fmtTime(ev.end_at)}`
         : fmtTime(ev.start_at),
       color: ev.color ?? "#3b82f6",
