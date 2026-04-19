@@ -191,10 +191,8 @@ export default function WallPage() {
   const [chores, setChores]           = useState<Chore[]>([])
   const [dinnerToday, setDinnerToday]         = useState<Meal | null>(null)
   const [lunchboxesToday, setLunchboxesToday] = useState<Meal[]>([])
-  const [dinnerTomorrow, setDinnerTomorrow]   = useState<Meal | null>(null)
-  const [lunchboxesTomorrow, setLunchboxesTomorrow] = useState<Meal[]>([])
+  const [nextDinners, setNextDinners]         = useState<{ dateStr: string; label: string; dinner: Meal | null }[]>([])
   const [wallMessages, setWallMessages]       = useState<WallMessage[]>([])
-  const [wallMsgFilter, setWallMsgFilter]     = useState<Set<string>>(new Set())
   const [choreStreaks, setChoreStreaks]        = useState<Map<string, WallChoreStreak>>(new Map())
   const [wallMemberPlants, setWallMemberPlants] = useState<WallMemberPlant[]>([])
 
@@ -210,10 +208,11 @@ export default function WallPage() {
   const fetchAll = useCallback(async () => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const tomorrow    = addDays(today, 1)
-    const weekEnd     = addDays(today, 7)
-    const todayStr    = toDateStr(today)
-    const tomorrowStr = toDateStr(tomorrow)
+    const weekEnd  = addDays(today, 7)
+    const todayStr = toDateStr(today)
+    const d1Str    = toDateStr(addDays(today, 1))
+    const d2Str    = toDateStr(addDays(today, 2))
+    const d3Str    = toDateStr(addDays(today, 3))
 
     // Compute Monday of current week for weekly_plants query
     const weekMonday = new Date(today)
@@ -240,7 +239,7 @@ export default function WallPage() {
       supabase
         .from("meals")
         .select("id, title, meal_type, date, notes, for_member_id")
-        .in("date", [todayStr, tomorrowStr]),
+        .in("date", [todayStr, d1Str, d2Str, d3Str]),
       supabase
         .from("messages")
         .select("id, from_member_id, to_member_id, body, created_at, dismissed_at")
@@ -270,16 +269,19 @@ export default function WallPage() {
     setWallMemberPlants((wpRes.data ?? []) as WallMemberPlant[])
     const memberList = membersRes.data ?? []
     setMembers(memberList)
-    // Initialise wall message filter to all members on first load
-    setWallMsgFilter((prev) => prev.size === 0 ? new Set(memberList.map((m) => m.id)) : prev)
     setChores(choresRes.data ?? [])
     setWallMessages(msgsRes.data ?? [])
 
     const meals = mealsRes.data ?? []
-    setDinnerToday(meals.find((m) => m.date === todayStr       && m.meal_type === "dinner")   ?? null)
-    setDinnerTomorrow(meals.find((m) => m.date === tomorrowStr && m.meal_type === "dinner")   ?? null)
-    setLunchboxesToday(meals.filter((m) => m.date === todayStr    && m.meal_type === "lunchbox"))
-    setLunchboxesTomorrow(meals.filter((m) => m.date === tomorrowStr && m.meal_type === "lunchbox"))
+    setDinnerToday(meals.find((m) => m.date === todayStr && m.meal_type === "dinner") ?? null)
+    setLunchboxesToday(meals.filter((m) => m.date === todayStr && m.meal_type === "lunchbox"))
+
+    // Next 3 days' dinners for the compact upcoming strip
+    setNextDinners([d1Str, d2Str, d3Str].map((dateStr) => {
+      const [y, mo, da] = dateStr.split("-").map(Number)
+      const label = new Date(y, mo - 1, da).toLocaleDateString("en-AU", { weekday: "short" })
+      return { dateStr, label, dinner: meals.find((m) => m.date === dateStr && m.meal_type === "dinner") ?? null }
+    }))
   }, [supabase])
 
   // Initial fetch + 60 s auto-refresh
@@ -309,25 +311,6 @@ export default function WallPage() {
       setChores((prev) => prev.map((c) => c.id === chore.id ? chore : c))
       toast.error("Couldn't update task.")
     }
-  }
-
-  // ── Wall message filter ────────────────────────────────────────────────────
-
-  function toggleWallMsgFilter(id: string) {
-    setWallMsgFilter((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  // ── Dismiss message ────────────────────────────────────────────────────────
-
-  async function dismissMessage(id: string) {
-    const now = new Date().toISOString()
-    setWallMessages((prev) => prev.filter((m) => m.id !== id))
-    await supabase.from("messages").update({ dismissed_at: now }).eq("id", id)
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -414,7 +397,7 @@ export default function WallPage() {
       </header>
 
       {/* ── 3-column grid: [2fr 2fr 1fr] × 2 rows ─────────────────────── */}
-      <div className="flex-1 min-h-0 grid grid-rows-2" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
+      <div className="flex-1 min-h-0 grid grid-rows-[3fr_2fr]" style={{ gridTemplateColumns: "2fr 2fr 1fr" }}>
 
         {/* ── Top Left: Meals ───────────────────────────────────────────── */}
         <ErrorBoundary label="Meals panel">
@@ -422,24 +405,21 @@ export default function WallPage() {
           <div className="shrink-0 px-6 pt-5 pb-3 border-b bg-muted/30">
             <h2 className="text-[28px] font-bold leading-none">🍽 Meals</h2>
           </div>
-          {/* Split: left = today, right = tomorrow */}
-          <div className="flex-1 min-h-0 flex flex-row divide-x">
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Today</p>
+          {/* Tonight: full detail */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4">
+            <MealDayPanel dinner={dinnerToday} lunchboxes={lunchboxesToday} memberMap={memberMap} />
+          </div>
+          {/* Upcoming 3 days — compact dinner strip */}
+          <div className="shrink-0 border-t bg-muted/20 px-6 py-3 flex flex-col gap-1.5">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Coming up</p>
+            {nextDinners.map(({ dateStr, label, dinner }) => (
+              <div key={dateStr} className="flex items-baseline gap-2">
+                <span className="text-sm font-bold text-muted-foreground w-8 shrink-0">{label}</span>
+                <span className={cn("text-base leading-snug", dinner ? "font-semibold" : "text-muted-foreground/60")}>
+                  {dinner ? dinner.title : "—"}
+                </span>
               </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
-                <MealDayPanel dinner={dinnerToday} lunchboxes={lunchboxesToday} memberMap={memberMap} />
-              </div>
-            </div>
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              <div className="shrink-0 px-4 py-2 bg-muted/20 border-b">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Tomorrow</p>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-4">
-                <MealDayPanel dinner={dinnerTomorrow} lunchboxes={lunchboxesTomorrow} memberMap={memberMap} />
-              </div>
-            </div>
+            ))}
           </div>
         </section>
         </ErrorBoundary>
@@ -575,110 +555,56 @@ export default function WallPage() {
         <ErrorBoundary label="Messages panel">
         <section className="flex flex-col overflow-hidden">
           <div className="shrink-0 px-6 pt-4 pb-3 border-b bg-muted/30">
-            <div className="flex items-center gap-3 mb-3">
-              <h2 className="text-[28px] font-bold leading-none flex-1">💬 Messages</h2>
-              {wallMessages.length > 0 && (
-                <span className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold min-w-[28px] h-7 px-2">
-                  {wallMessages.length}
-                </span>
-              )}
-            </div>
-            {/* Compact member filter buttons */}
-            {members.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {members.map((m) => {
-                  const selected = wallMsgFilter.has(m.id)
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => toggleWallMsgFilter(m.id)}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-semibold transition-all border-2",
-                        !selected && "opacity-40",
-                      )}
-                      style={{
-                        backgroundColor: selected && m.color ? `${m.color}20` : undefined,
-                        color: selected && m.color ? m.color : undefined,
-                        borderColor: selected && m.color ? m.color : "transparent",
-                      }}
-                    >
-                      {m.avatar_emoji && <span className="text-base leading-none">{m.avatar_emoji}</span>}
-                      <span className="text-sm">{m.name}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            <h2 className="text-[28px] font-bold leading-none">💬 Messages</h2>
           </div>
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {(() => {
-              // Apply filter
-              const filtered = wallMsgFilter.size === 0
-                ? wallMessages
-                : wallMessages.filter((m) => wallMsgFilter.has(m.to_member_id))
-
-              if (filtered.length === 0) {
-                return (
-                  <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                    <span className="text-4xl">💬</span>
-                    <p className="text-xl italic">No messages — all caught up!</p>
-                  </div>
-                )
-              }
-
               // Group by recipient
               const groups = new Map<string, WallMessage[]>()
-              for (const msg of filtered) {
+              for (const msg of wallMessages) {
                 const g = groups.get(msg.to_member_id) ?? []
                 g.push(msg)
                 groups.set(msg.to_member_id, g)
               }
-              return Array.from(groups.entries()).map(([toId, msgs]) => {
-                const recipient = memberMap.get(toId)
+
+              if (groups.size === 0) {
                 return (
-                  <div key={toId} className="space-y-2">
-                    {/* Recipient chip */}
-                    {recipient && (
-                      <div
-                        className="inline-flex items-center gap-2 rounded-full px-3 py-1"
-                        style={{
-                          backgroundColor: recipient.color ? `${recipient.color}20` : undefined,
-                          color: recipient.color ?? undefined,
-                        }}
-                      >
-                        {recipient.avatar_emoji && (
-                          <span className="text-xl leading-none">{recipient.avatar_emoji}</span>
-                        )}
-                        <span className="text-base font-bold">{recipient.name}</span>
-                      </div>
-                    )}
-                    {msgs.map((msg) => {
-                      const sender = msg.from_member_id ? memberMap.get(msg.from_member_id) : null
-                      return (
-                        <div key={msg.id}
-                          className="relative rounded-xl border bg-card px-4 py-3 pr-10">
-                          <p className="text-[18px] leading-snug font-medium">{msg.body}</p>
-                          <p className="text-sm text-muted-foreground mt-1.5">
-                            {sender
-                              ? `From ${sender.avatar_emoji ?? ""} ${sender.name} · `
-                              : ""}
-                            {new Date(msg.created_at).toLocaleTimeString("en-AU", {
-                              hour: "numeric", minute: "2-digit", hour12: true,
-                            })}
-                          </p>
-                          <button
-                            onClick={() => dismissMessage(msg.id)}
-                            className="absolute top-3 right-3 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            aria-label="Dismiss"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )
-                    })}
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                    <span className="text-4xl">💬</span>
+                    <p className="text-xl italic">No messages</p>
                   </div>
                 )
-              })
+              }
+
+              return (
+                <div className="flex flex-col gap-3">
+                  {Array.from(groups.entries()).map(([toId, msgs]) => {
+                    const recipient = memberMap.get(toId)
+                    return (
+                      <div
+                        key={toId}
+                        className="flex items-center gap-3 rounded-xl px-4 py-3"
+                        style={{
+                          backgroundColor: recipient?.color ? `${recipient.color}15` : undefined,
+                        }}
+                      >
+                        <span className="text-3xl leading-none shrink-0">
+                          {recipient?.avatar_emoji ?? "👤"}
+                        </span>
+                        <span
+                          className="text-xl font-bold flex-1 min-w-0 truncate"
+                          style={{ color: recipient?.color ?? undefined }}
+                        >
+                          {recipient?.name ?? "Unknown"}
+                        </span>
+                        <span className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground text-base font-bold min-w-[32px] h-8 px-2 shrink-0">
+                          💬 {msgs.length}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
             })()}
           </div>
         </section>
