@@ -20,6 +20,10 @@ import { GrowingPlant } from "./_growing-plant"
 
 function pad(n: number) { return String(n).padStart(2, "0") }
 
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 function getWeekStart(d: Date): string {
   const day = d.getDay()
   const offset = (day + 6) % 7
@@ -74,8 +78,9 @@ const PLANT_TABLES = [
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface MemberWeeklyPlant {
-  plant_id:  string
-  member_id: string
+  plant_id:   string
+  member_id:  string
+  created_at: string
 }
 
 interface PlantDiscovery {
@@ -143,7 +148,7 @@ export default function PlantsPage() {
         .select("id, name, avatar_emoji, color")
         .order("created_at"),
       supabase.from("member_weekly_plants")
-        .select("plant_id, member_id")
+        .select("plant_id, member_id, created_at")
         .eq("week_start", weekStart),
       supabase.from("plant_discoveries")
         .select("plant_id, member_id, first_eaten_date"),
@@ -160,6 +165,18 @@ export default function PlantsPage() {
     firedMember.current.clear()
     firedFamily.current = false
     fetchData()
+    // Poll every 60 s; detect midnight so pending plants roll into confirmed
+    let lastDate = toDateStr(new Date())
+    const id = setInterval(() => {
+      const now = toDateStr(new Date())
+      if (now !== lastDate) {
+        lastDate = now
+        firedMember.current.clear()
+        firedFamily.current = false
+      }
+      fetchData()
+    }, 60_000)
+    return () => clearInterval(id)
   }, [fetchData])
 
   useRealtimeChannel(supabase, `plants-${weekStart}`, PLANT_TABLES, fetchData)
@@ -195,14 +212,34 @@ export default function PlantsPage() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const libraryMap = new Map(library.map(p => [p.id, p]))
+  const libraryMap    = new Map(library.map(p => [p.id, p]))
+  const todayLocalStr = toDateStr(new Date())
 
+  // Convert a UTC ISO timestamp to a local YYYY-MM-DD string
+  function localDateStr(iso: string) { return toDateStr(new Date(iso)) }
+
+  // Pending = logged today (local time). Only meaningful for the current week.
+  const confirmedMwPlants = isCurrentWeek
+    ? mwPlants.filter(wp => localDateStr(wp.created_at) < todayLocalStr)
+    : mwPlants
+  const pendingMwPlants = isCurrentWeek
+    ? mwPlants.filter(wp => localDateStr(wp.created_at) === todayLocalStr)
+    : []
+
+  // Confirmed plant IDs per member (count towards goal)
   function memberPlantIds(memberId: string) {
+    return new Set(confirmedMwPlants.filter(w => w.member_id === memberId).map(w => w.plant_id))
+  }
+  // Pending plant IDs per member (logged today, not yet counted)
+  function memberPendingIds(memberId: string) {
+    return new Set(pendingMwPlants.filter(w => w.member_id === memberId).map(w => w.plant_id))
+  }
+  // All plant IDs per member (for grid display)
+  function memberAllIds(memberId: string) {
     return new Set(mwPlants.filter(w => w.member_id === memberId).map(w => w.plant_id))
   }
 
-  // Family total = sum of each member's individual count
-  // Family goal  = every member hits 30 (total = members × 30)
+  // Family total = sum of each member's confirmed count only
   const familyGoal  = members.length > 0 && members.every(m => memberPlantIds(m.id).size >= GOAL)
   const familyCount = members.reduce((sum, m) => sum + memberPlantIds(m.id).size, 0)
   const familyMax   = members.length * GOAL
@@ -269,7 +306,7 @@ export default function PlantsPage() {
   // ── Quick-log toggle (tap in library) ──────────────────────────────────────
 
   async function quickLog(plant: Plant, memberId: string) {
-    const ids = memberPlantIds(memberId)
+    const ids = memberAllIds(memberId)
     if (ids.has(plant.id)) {
       scheduleDelete(plant.id, plant.name, memberId)
       return
@@ -431,11 +468,11 @@ export default function PlantsPage() {
           ) : (
             <div className="flex gap-3 overflow-x-auto pb-2 sm:flex-wrap sm:overflow-visible">
               {members.map((m, idx) => {
-                const ids   = memberPlantIds(m.id)
-                const count = ids.size
-                const pct   = Math.min(100, Math.round((count / GOAL) * 100))
-                const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
-                const goal  = count >= GOAL
+                const count   = memberPlantIds(m.id).size
+                const pending = memberPendingIds(m.id).size
+                const pct     = Math.min(100, Math.round((count / GOAL) * 100))
+                const color   = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+                const goal    = count >= GOAL
 
                 return (
                   <button
@@ -467,6 +504,9 @@ export default function PlantsPage() {
                       {goal && (
                         <p className="text-[10px] font-bold text-green-500 mt-0.5">🎉 Done!</p>
                       )}
+                      {!goal && pending > 0 && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">🕐 +{pending} pending</p>
+                      )}
                     </div>
                   </button>
                 )
@@ -478,13 +518,17 @@ export default function PlantsPage() {
 
       {/* ── Per-member sections ───────────────────────────────────────────── */}
       {members.map((m, idx) => {
-        const ids   = memberPlantIds(m.id)
-        const count = ids.size
-        const pct   = Math.min(100, Math.round((count / GOAL) * 100))
-        const color = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
-        const goal  = count >= GOAL
+        const confirmedIds = memberPlantIds(m.id)
+        const pendingIds   = memberPendingIds(m.id)
+        const allIds       = memberAllIds(m.id)
+        const count        = confirmedIds.size
+        const pending      = pendingIds.size
+        const pct          = Math.min(100, Math.round((count / GOAL) * 100))
+        const color        = m.color ?? FALLBACK_COLORS[idx % FALLBACK_COLORS.length]
+        const goal         = count >= GOAL
 
-        const loggedPlants = Array.from(ids)
+        // Grid shows all plants (confirmed + pending)
+        const loggedPlants = Array.from(allIds)
           .map(pid => libraryMap.get(pid))
           .filter(Boolean) as Plant[]
 
@@ -515,12 +559,17 @@ export default function PlantsPage() {
                       style={{ width: `${pct}%`, backgroundColor: goal ? "#22c55e" : color }}
                     />
                   </div>
-                  <span className={cn(
-                    "text-sm font-black tabular-nums shrink-0",
-                    goal ? "text-green-500" : "text-foreground",
-                  )}>
-                    🌱 {count} / {GOAL}
-                  </span>
+                  <div className="text-right shrink-0">
+                    <span className={cn(
+                      "text-sm font-black tabular-nums",
+                      goal ? "text-green-500" : "text-foreground",
+                    )}>
+                      🌱 {count} / {GOAL}
+                    </span>
+                    {!goal && pending > 0 && (
+                      <p className="text-[11px] text-muted-foreground">🕐 +{pending} pending</p>
+                    )}
+                  </div>
                 </div>
               </div>
               <Button
@@ -557,6 +606,7 @@ export default function PlantsPage() {
                       key={p.id}
                       plant={p}
                       isNew={isNew(p.id, m.id)}
+                      isPending={pendingIds.has(p.id)}
                       onDelete={() => scheduleDelete(p.id, p.name, m.id)}
                     />
                   ))}
@@ -580,7 +630,7 @@ export default function PlantsPage() {
             <MemberLibrary
               member={m}
               library={library}
-              loggedIds={ids}
+              loggedIds={allIds}
               onQuickLog={(plant) => quickLog(plant, m.id)}
             />
           </section>
@@ -663,18 +713,24 @@ export default function PlantsPage() {
 
 // ── Plant emoji card ───────────────────────────────────────────────────────────
 
-function PlantCard({ plant, isNew, onDelete }: {
+function PlantCard({ plant, isNew, isPending, onDelete }: {
   plant: Plant
   isNew: boolean
+  isPending: boolean
   onDelete: () => void
 }) {
   return (
-    <div className="relative group aspect-square">
+    <div className={cn("relative group aspect-square", isPending && "opacity-60")}>
       <div className={cn(
         "relative flex flex-col items-center justify-center gap-0.5 rounded-lg p-1 h-full",
         "border-2 border-transparent hover:border-border transition-all",
         CATEGORY_COLORS[plant.category] ?? CATEGORY_COLORS.other,
       )}>
+        {/* Pending clock — replaces the green confirmed border feel */}
+        {isPending && (
+          <span className="absolute top-0.5 left-0.5 text-[9px] leading-none select-none">🕐</span>
+        )}
+
         {/* Plant emoji */}
         <span className="text-[20px] leading-none select-none">{plant.emoji ?? "🌿"}</span>
         {/* Plant name */}
@@ -698,7 +754,7 @@ function PlantCard({ plant, isNew, onDelete }: {
         </button>
       </div>
 
-      {/* NEW ribbon */}
+      {/* NEW ribbon — shows immediately even for pending plants (req 6) */}
       {isNew && (
         <div className="absolute -top-2 -left-1 z-10">
           <span className="text-[9px] font-black uppercase bg-amber-400 text-amber-900

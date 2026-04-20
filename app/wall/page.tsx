@@ -69,7 +69,7 @@ interface WallMessage {
 
 interface BirthdayRow { id: string; name: string; date: string; type: "birthday" | "anniversary"; color: string }
 interface WallChoreStreak { member_id: string; streak_count: number; longest_streak: number }
-interface WallMemberPlant { plant_id: string; member_id: string }
+interface WallMemberPlant { plant_id: string; member_id: string; created_at: string }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ export default function WallPage() {
         .is("dismissed_at", null).order("created_at", { ascending: false }),
       supabase.from("birthdays").select("id,name,date,type,color"),
       supabase.from("chore_streaks").select("member_id,streak_count,longest_streak"),
-      supabase.from("member_weekly_plants").select("plant_id,member_id").eq("week_start", weekMondayStr),
+      supabase.from("member_weekly_plants").select("plant_id,member_id,created_at").eq("week_start", weekMondayStr),
     ])
 
     // Keep only events that end on or after today (catches multi-day events in progress)
@@ -218,16 +218,22 @@ export default function WallPage() {
     }).filter(b => b.daysAway <= 7).sort((a, b) => a.daysAway - b.daysAway)
   }, [birthdays])
 
-  // Plant counts
+  // Plant counts — confirmed only (logged before today); pending shown as suffix
+  const confirmedWallPlants = wallMemberPlants.filter(wp => toDateStr(new Date(wp.created_at)) < todayStr)
+  const pendingWallPlants   = wallMemberPlants.filter(wp => toDateStr(new Date(wp.created_at)) === todayStr)
+
   const familyCount = members.reduce((sum, m) =>
-    sum + new Set(wallMemberPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size
+    sum + new Set(confirmedWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size
   , 0)
   const familyMax  = members.length * 30
   const familyGoal = members.length > 0 && members.every(m =>
-    new Set(wallMemberPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size >= 30
+    new Set(confirmedWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size >= 30
   )
   const familyPct         = familyMax > 0 ? Math.min(100, Math.round((familyCount / familyMax) * 100)) : 0
   const growingPlantCount = familyGoal ? 30 : Math.floor((familyPct / 100) * 30)
+  const familyPendingCount = members.reduce((sum, m) =>
+    sum + new Set(pendingWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size
+  , 0)
 
   // Members with unread messages
   const msgMemberNames = useMemo(() => {
@@ -366,11 +372,12 @@ export default function WallPage() {
             <div className="flex-1 overflow-hidden px-4 py-2">
               <PlantsSection
                 members={members}
-                wallMemberPlants={wallMemberPlants}
+                confirmedWallPlants={confirmedWallPlants}
                 familyCount={familyCount}
                 familyMax={familyMax}
                 familyGoal={familyGoal}
                 growingPlantCount={growingPlantCount}
+                pendingCount={familyPendingCount}
               />
             </div>
           </div>
@@ -687,14 +694,15 @@ function CalendarSection({
 // ── PlantsSection ──────────────────────────────────────────────────────────────
 
 function PlantsSection({
-  members, wallMemberPlants, familyCount, familyMax, familyGoal, growingPlantCount,
+  members, confirmedWallPlants, familyCount, familyMax, familyGoal, growingPlantCount, pendingCount,
 }: {
   members: Member[]
-  wallMemberPlants: WallMemberPlant[]
+  confirmedWallPlants: WallMemberPlant[]
   familyCount: number
   familyMax: number
   familyGoal: boolean
   growingPlantCount: number
+  pendingCount: number
 }) {
   return (
     <div className="h-full flex flex-col items-center justify-between gap-2">
@@ -704,20 +712,25 @@ function PlantsSection({
       </div>
 
       {/* Family total */}
-      <p className={cn(
-        "text-[20px] font-black tabular-nums leading-none shrink-0",
-        familyGoal ? "text-green-500" : "text-foreground",
-      )}>
-        🌳 {familyCount}
-        <span className="text-[14px] font-semibold text-muted-foreground"> / {familyMax}</span>
-      </p>
+      <div className="shrink-0 text-center">
+        <p className={cn(
+          "text-[20px] font-black tabular-nums leading-none",
+          familyGoal ? "text-green-500" : "text-foreground",
+        )}>
+          🌳 {familyCount}
+          <span className="text-[14px] font-semibold text-muted-foreground"> / {familyMax}</span>
+        </p>
+        {pendingCount > 0 && (
+          <p className="text-[11px] text-muted-foreground mt-0.5">(+{pendingCount} pending)</p>
+        )}
+      </div>
 
-      {/* Per-member compact row */}
+      {/* Per-member compact row — confirmed counts only */}
       {members.length > 0 && (
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 shrink-0">
           {members.map(m => {
             const count = new Set(
-              wallMemberPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)
+              confirmedWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)
             ).size
             const goal = count >= 30
             return (
