@@ -10,6 +10,10 @@
  * When a component unmounts it should call reportStatus(id, "connected")
  * to remove its entry from the aggregate — "connected" is treated as
  * "no issue from this channel".
+ *
+ * Degraded states (offline / reconnecting) are debounced by DEGRADED_DELAY_MS
+ * so brief websocket hiccups during initial connection don't flash the indicator.
+ * Recovery back to connected is always immediate.
  */
 
 import {
@@ -22,6 +26,9 @@ import {
 } from "react"
 
 export type ChannelStatus = "connected" | "reconnecting" | "offline"
+
+// Only show the indicator if the degraded state persists longer than this.
+const DEGRADED_DELAY_MS = 5_000
 
 interface ConnectionStatusContextValue {
   worstStatus: ChannelStatus
@@ -38,7 +45,8 @@ export function useConnectionStatus() {
 }
 
 export function ConnectionStatusProvider({ children }: { children: ReactNode }) {
-  const statusMap = useRef(new Map<string, ChannelStatus>())
+  const statusMap    = useRef(new Map<string, ChannelStatus>())
+  const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [worstStatus, setWorstStatus] = useState<ChannelStatus>("connected")
 
   const reportStatus = useCallback((channelId: string, status: ChannelStatus) => {
@@ -49,9 +57,29 @@ export function ConnectionStatusProvider({ children }: { children: ReactNode }) 
     }
 
     const statuses = Array.from(statusMap.current.values())
-    if (statuses.includes("offline"))      setWorstStatus("offline")
-    else if (statuses.includes("reconnecting")) setWorstStatus("reconnecting")
-    else                                   setWorstStatus("connected")
+    const worst: ChannelStatus =
+      statuses.includes("offline")       ? "offline"      :
+      statuses.includes("reconnecting")  ? "reconnecting" :
+                                           "connected"
+
+    if (worst === "connected") {
+      // Recover immediately and cancel any pending degraded timer.
+      if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
+      setWorstStatus("connected")
+    } else {
+      // Only flip to degraded after a delay — ignore brief transient drops.
+      if (!debounceRef.current) {
+        debounceRef.current = setTimeout(() => {
+          debounceRef.current = null
+          const current = Array.from(statusMap.current.values())
+          const w: ChannelStatus =
+            current.includes("offline")      ? "offline"      :
+            current.includes("reconnecting") ? "reconnecting" :
+                                               "connected"
+          setWorstStatus(w)
+        }, DEGRADED_DELAY_MS)
+      }
+    }
   }, [])
 
   return (
