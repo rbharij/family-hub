@@ -80,6 +80,7 @@ const PLANT_TABLES = [
 interface MemberWeeklyPlant {
   plant_id:   string
   member_id:  string
+  added_by:   string
   created_at: string
 }
 
@@ -148,7 +149,7 @@ export default function PlantsPage() {
         .select("id, name, avatar_emoji, color")
         .order("created_at"),
       supabase.from("member_weekly_plants")
-        .select("plant_id, member_id, created_at")
+        .select("plant_id, member_id, added_by, created_at")
         .eq("week_start", weekStart),
       supabase.from("plant_discoveries")
         .select("plant_id, member_id, first_eaten_date"),
@@ -218,12 +219,12 @@ export default function PlantsPage() {
   // Convert a UTC ISO timestamp to a local YYYY-MM-DD string
   function localDateStr(iso: string) { return toDateStr(new Date(iso)) }
 
-  // Pending = logged today (local time). Only meaningful for the current week.
+  // Manual plants count immediately; meal-sourced plants only count after end of day.
   const confirmedMwPlants = isCurrentWeek
-    ? mwPlants.filter(wp => localDateStr(wp.created_at) < todayLocalStr)
+    ? mwPlants.filter(wp => wp.added_by === "manual" || localDateStr(wp.created_at) < todayLocalStr)
     : mwPlants
   const pendingMwPlants = isCurrentWeek
-    ? mwPlants.filter(wp => localDateStr(wp.created_at) === todayLocalStr)
+    ? mwPlants.filter(wp => wp.added_by !== "manual" && localDateStr(wp.created_at) === todayLocalStr)
     : []
 
   // Confirmed plant IDs per member (count towards goal)
