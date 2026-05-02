@@ -11,6 +11,37 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { GrowingPlant } from "@/app/plants/_growing-plant"
 import { useAppSettings } from "@/lib/app-settings-context"
 
+// ── Weather ────────────────────────────────────────────────────────────────────
+
+interface WeatherData {
+  temp: number
+  feelsLike: number
+  emoji: string
+  description: string
+  high: number
+  low: number
+  rainChance: number
+}
+
+function useWeather(lat: number, lon: number) {
+  const [weather, setWeather] = useState<WeatherData | null>(null)
+
+  useEffect(() => {
+    async function fetch_() {
+      try {
+        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}`)
+        if (res.ok) setWeather(await res.json())
+      } catch { /* silent */ }
+    }
+    fetch_()
+    // Refresh every 30 minutes
+    const id = setInterval(fetch_, 30 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [lat, lon])
+
+  return weather
+}
+
 // ── Stable realtime config ─────────────────────────────────────────────────────
 const WALL_TABLES = [
   { table: "events" },
@@ -99,6 +130,11 @@ export default function WallPage() {
   const router = useRouter()
   const supabase = useRef(createClient()).current
   const { settings } = useAppSettings()
+
+  const weather = useWeather(
+    settings?.weatherLat ?? 1.3521,
+    settings?.weatherLon ?? 103.8198,
+  )
 
   const [now, setNow] = useState<Date>(() => new Date())
 
@@ -269,8 +305,26 @@ export default function WallPage() {
           </span>
         </div>
 
+        {/* Weather */}
+        {weather && (
+          <div className="flex items-center gap-2 shrink-0 border-l pl-3">
+            <span className="text-[26px] leading-none">{weather.emoji}</span>
+            <div className="leading-tight">
+              <p className="text-[22px] font-bold tabular-nums leading-none">
+                {weather.temp}°
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                H:{weather.high}° L:{weather.low}°
+                {weather.rainChance > 20 && (
+                  <span className="ml-1 text-blue-400">💧{weather.rainChance}%</span>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Date + Exit */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 shrink-0 border-l pl-3">
           <span className="text-sm text-muted-foreground">{dateLabel}</span>
           <button
             onClick={() => router.back()}

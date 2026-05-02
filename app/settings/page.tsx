@@ -113,6 +113,10 @@ export default function SettingsPage() {
   const [lFrom, setLFrom] = useState(lightFromHour)
   const [savingHours, setSavingHours] = useState(false)
 
+  // Weather location
+  const [weatherQuery, setWeatherQuery]   = useState(settings?.weatherLocation ?? "Singapore")
+  const [weatherSaving, setWeatherSaving] = useState(false)
+
   // Google Calendar sync
   const [syncing, setSyncing]     = useState(false)
   const [lastSynced, setLastSynced] = useState<number | null>(() => {
@@ -123,9 +127,12 @@ export default function SettingsPage() {
 
   const supabase = useRef(createClient()).current
 
-  // Sync familyName state when settings load
+  // Sync familyName + weatherQuery state when settings load
   useEffect(() => {
-    if (settings) setFamilyName(settings.familyName)
+    if (settings) {
+      setFamilyName(settings.familyName)
+      setWeatherQuery(settings.weatherLocation)
+    }
   }, [settings])
 
   // Sync hour state when theme context loads
@@ -155,6 +162,33 @@ export default function SettingsPage() {
     await updateSettings({ familyName: name })
     setSavingName(false)
     toast.success("Family name updated")
+  }
+
+  // ── Save weather location ─────────────────────────────────────────────────
+
+  async function saveWeatherLocation() {
+    const query = weatherQuery.trim()
+    if (!query) return
+    setWeatherSaving(true)
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`
+      )
+      const data = await res.json()
+      const result = data.results?.[0]
+      if (!result) { toast.error(`Couldn't find "${query}"`); return }
+      await updateSettings({
+        weatherLocation: result.name,
+        weatherLat: result.latitude,
+        weatherLon: result.longitude,
+      })
+      setWeatherQuery(result.name)
+      toast.success(`Weather location set to ${result.name}`)
+    } catch {
+      toast.error("Failed to look up location")
+    } finally {
+      setWeatherSaving(false)
+    }
   }
 
   // ── Member CRUD ───────────────────────────────────────────────────────────
@@ -511,6 +545,26 @@ export default function SettingsPage() {
             </select>
           </div>
         )}
+
+        <div className="space-y-1.5">
+          <Label htmlFor="weather-location">Weather location</Label>
+          <div className="flex gap-2">
+            <Input
+              id="weather-location"
+              value={weatherQuery}
+              onChange={(e) => setWeatherQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveWeatherLocation()}
+              placeholder="e.g. Singapore"
+              className="flex-1"
+            />
+            <Button onClick={saveWeatherLocation} disabled={weatherSaving} size="sm" className="shrink-0">
+              {weatherSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Shown on the wall display. Currently: <strong>{settings?.weatherLocation ?? "Singapore"}</strong>
+          </p>
+        </div>
       </section>
 
       {/* ── Google Calendar ───────────────────────────────────────────────── */}

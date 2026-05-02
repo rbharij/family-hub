@@ -13,6 +13,9 @@ export interface AppSettings {
   setupComplete: boolean
   darkFromHour: number
   lightFromHour: number
+  weatherLocation: string
+  weatherLat: number
+  weatherLon: number
 }
 
 interface AppSettingsContextValue {
@@ -43,6 +46,9 @@ type SettingsRow = {
   setup_complete: boolean
   dark_from_hour: number
   light_from_hour: number
+  weather_location: string | null
+  weather_lat: number | null
+  weather_lon: number | null
 }
 
 function toModel(row: SettingsRow): AppSettings {
@@ -52,6 +58,9 @@ function toModel(row: SettingsRow): AppSettings {
     setupComplete: row.setup_complete,
     darkFromHour: row.dark_from_hour,
     lightFromHour: row.light_from_hour,
+    weatherLocation: row.weather_location ?? "Singapore",
+    weatherLat: row.weather_lat ?? 1.3521,
+    weatherLon: row.weather_lon ?? 103.8198,
   }
 }
 
@@ -63,13 +72,12 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const fetchSettings = useCallback(async () => {
     const { data } = await supabase
       .from("app_settings")
-      .select("id, family_name, setup_complete, dark_from_hour, light_from_hour")
+      .select("id, family_name, setup_complete, dark_from_hour, light_from_hour, weather_location, weather_lat, weather_lon")
       .single()
 
     if (data) {
       const s = toModel(data as SettingsRow)
       setSettings(s)
-      // Sync theme hours to localStorage for the ThemeProvider + anti-FOUC script
       localStorage.setItem("dark-from-hour", String(s.darkFromHour))
       localStorage.setItem("light-from-hour", String(s.lightFromHour))
     }
@@ -83,10 +91,13 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       if (!settings) return
 
       const dbPatch: Record<string, unknown> = {}
-      if (patch.familyName    !== undefined) dbPatch.family_name     = patch.familyName
-      if (patch.setupComplete !== undefined) dbPatch.setup_complete  = patch.setupComplete
-      if (patch.darkFromHour  !== undefined) dbPatch.dark_from_hour  = patch.darkFromHour
-      if (patch.lightFromHour !== undefined) dbPatch.light_from_hour = patch.lightFromHour
+      if (patch.familyName       !== undefined) dbPatch.family_name      = patch.familyName
+      if (patch.setupComplete    !== undefined) dbPatch.setup_complete   = patch.setupComplete
+      if (patch.darkFromHour     !== undefined) dbPatch.dark_from_hour   = patch.darkFromHour
+      if (patch.lightFromHour    !== undefined) dbPatch.light_from_hour  = patch.lightFromHour
+      if (patch.weatherLocation  !== undefined) dbPatch.weather_location = patch.weatherLocation
+      if (patch.weatherLat       !== undefined) dbPatch.weather_lat      = patch.weatherLat
+      if (patch.weatherLon       !== undefined) dbPatch.weather_lon      = patch.weatherLon
 
       await supabase.from("app_settings").update(dbPatch).eq("id", settings.id)
 
