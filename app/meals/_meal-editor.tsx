@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { Loader2 } from "lucide-react"
+import { Loader2, BookOpen, ExternalLink, Search } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -50,6 +50,11 @@ export function MealEditor({
   const [eaterIds, setEaterIds]       = useState<string[]>([])
   const [copyToOthers, setCopyToOthers] = useState(false)
 
+  // Recipe picker
+  const [recipePickerOpen, setRecipePickerOpen] = useState(false)
+  const [allRecipes, setAllRecipes]             = useState<{ id: string; title: string; notes: string | null; url: string | null; tags: string[] }[]>([])
+  const [recipeSearch, setRecipeSearch]         = useState("")
+
   const supabase = useRef(createClient()).current
   const SCHOOL_LUNCH = "School Lunch"
 
@@ -72,6 +77,14 @@ export function MealEditor({
       .order("created_at")
       .then(({ data }) => setMembers((data ?? []) as FamilyMember[]))
   }, [supabase])
+
+  // ── Load recipes when picker opens ────────────────────────────────────────
+
+  useEffect(() => {
+    if (!recipePickerOpen) return
+    supabase.from("recipes").select("id, title, notes, url, tags").order("title")
+      .then(({ data }) => setAllRecipes(data ?? []))
+  }, [recipePickerOpen, supabase])
 
   // ── Reset on open ──────────────────────────────────────────────────────────
 
@@ -308,9 +321,19 @@ export function MealEditor({
 
           {!schoolLunch && (
             <div className="space-y-1.5">
-              <Label htmlFor="meal-title">
-                What&apos;s for {MEAL_LABELS[mealType].toLowerCase()}? *
-              </Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="meal-title">
+                  What&apos;s for {MEAL_LABELS[mealType].toLowerCase()}? *
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => { setRecipeSearch(""); setRecipePickerOpen(true) }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0"
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  From recipes
+                </button>
+              </div>
               <Input
                 id="meal-title"
                 value={title}
@@ -411,6 +434,93 @@ export function MealEditor({
           <Button size="sm" onClick={handleSave} disabled={saving || clearing}>
             {saving && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
             {meal ? "Save" : "Add"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* ── Recipe picker dialog ─────────────────────────────────────────── */}
+    <Dialog open={recipePickerOpen} onOpenChange={o => !o && setRecipePickerOpen(false)}>
+      <DialogContent className="sm:max-w-md max-h-[80dvh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base flex items-center gap-2">
+            <BookOpen className="h-4 w-4" /> Choose from recipes
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Search */}
+        <div className="relative shrink-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            value={recipeSearch}
+            onChange={e => setRecipeSearch(e.target.value)}
+            placeholder="Search recipes…"
+            className="pl-9"
+            autoFocus
+          />
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-1 min-h-0">
+          {allRecipes
+            .filter(r => !recipeSearch.trim() || r.title.toLowerCase().includes(recipeSearch.toLowerCase()))
+            .map(r => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => {
+                  setTitle(r.title)
+                  setNotes(r.notes ?? "")
+                  setRecipePickerOpen(false)
+                }}
+                className="w-full text-left rounded-lg px-3 py-2.5 hover:bg-muted transition-colors group"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-snug truncate">{r.title}</p>
+                    {r.notes && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{r.notes}</p>
+                    )}
+                    {r.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {r.tags.map(t => (
+                          <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {r.url && (
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="shrink-0 mt-0.5 text-muted-foreground hover:text-primary"
+                      aria-label="Open recipe"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                </div>
+              </button>
+            ))
+          }
+          {allRecipes.length === 0 && (
+            <p className="text-sm text-muted-foreground italic text-center py-8">
+              No recipes saved yet — add some in the Recipes tab
+            </p>
+          )}
+          {allRecipes.length > 0 &&
+            allRecipes.filter(r => !recipeSearch.trim() || r.title.toLowerCase().includes(recipeSearch.toLowerCase())).length === 0 && (
+            <p className="text-sm text-muted-foreground italic text-center py-8">No results</p>
+          )}
+        </div>
+
+        <DialogFooter className="shrink-0 mt-2">
+          <Button variant="outline" size="sm" onClick={() => setRecipePickerOpen(false)}>
+            Cancel
           </Button>
         </DialogFooter>
       </DialogContent>

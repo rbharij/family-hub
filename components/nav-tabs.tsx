@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Calendar, ClipboardList, ShoppingCart, UtensilsCrossed, Monitor, Settings, MessageSquare, Sprout } from "lucide-react"
+import { Calendar, ClipboardList, ShoppingCart, UtensilsCrossed, Monitor, Settings, MessageSquare, Sprout, BookOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMessageCount } from "@/lib/message-count-context"
 
@@ -11,6 +11,7 @@ const MAIN_TABS = [
   { name: "Tasks",    href: "/chores",    icon: ClipboardList },
   { name: "Shopping", href: "/shopping",  icon: ShoppingCart },
   { name: "Meals",    href: "/meals",     icon: UtensilsCrossed },
+  { name: "Recipes",  href: "/recipes",   icon: BookOpen },
   { name: "Plants",   href: "/plants",    icon: Sprout },
   { name: "Messages", href: "/messages",  icon: MessageSquare },
 ]
