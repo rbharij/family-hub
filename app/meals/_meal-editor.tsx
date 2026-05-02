@@ -294,6 +294,7 @@ export function MealEditor({
     : `${MEAL_EMOJIS[mealType]} ${MEAL_LABELS[mealType]} — ${DAY_FULL[dayIndex]}`
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -525,5 +526,6 @@ export function MealEditor({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   )
 }
