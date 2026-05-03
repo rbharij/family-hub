@@ -1,0 +1,237 @@
+-- ── Expanded plant library ────────────────────────────────────────────────────
+-- Adds ~150 new entries including colour/variety variations.
+-- Uses ON CONFLICT DO NOTHING so safe to re-run.
+
+insert into public.plants (name, emoji, category) values
+
+  -- ── Pepper variations (supplement the existing generic 'Pepper') ──────────
+  ('Red Pepper',        '🫑', 'vegetable'),
+  ('Green Pepper',      '🫑', 'vegetable'),
+  ('Yellow Pepper',     '🫑', 'vegetable'),
+  ('Orange Pepper',     '🫑', 'vegetable'),
+  ('Jalapeño',          '🌶️', 'vegetable'),
+  ('Habanero',          '🌶️', 'vegetable'),
+  ('Scotch Bonnet',     '🌶️', 'vegetable'),
+  ('Poblano',           '🌶️', 'vegetable'),
+  ('Chipotle',          '🌶️', 'vegetable'),
+
+  -- ── Tomato variations ─────────────────────────────────────────────────────
+  ('Cherry Tomato',     '🍅', 'vegetable'),
+  ('Roma Tomato',       '🍅', 'vegetable'),
+  ('Vine Tomato',       '🍅', 'vegetable'),
+  ('Heirloom Tomato',   '🍅', 'vegetable'),
+  ('Sun-Dried Tomato',  '🍅', 'vegetable'),
+
+  -- ── Onion variations ──────────────────────────────────────────────────────
+  ('Red Onion',         '🧅', 'vegetable'),
+  ('White Onion',       '🧅', 'vegetable'),
+  ('Spring Onion',      '🌿', 'vegetable'),
+  ('Leek',              '🌿', 'vegetable'),
+  ('Shallot',           '🧅', 'vegetable'),
+  ('Chives',            '🌿', 'vegetable'),
+
+  -- ── Mushroom variations ───────────────────────────────────────────────────
+  ('Button Mushroom',   '🍄', 'vegetable'),
+  ('Portobello',        '🍄', 'vegetable'),
+  ('Shiitake',          '🍄', 'vegetable'),
+  ('Oyster Mushroom',   '🍄', 'vegetable'),
+  ('Enoki Mushroom',    '🍄', 'vegetable'),
+  ('King Oyster',       '🍄', 'vegetable'),
+  ('Porcini',           '🍄', 'vegetable'),
+  ('Chanterelle',       '🍄', 'vegetable'),
+  ('Cremini',           '🍄', 'vegetable'),
+
+  -- ── Lettuce/leafy variations ──────────────────────────────────────────────
+  ('Romaine Lettuce',   '🥬', 'vegetable'),
+  ('Iceberg Lettuce',   '🥬', 'vegetable'),
+  ('Butter Lettuce',    '🥬', 'vegetable'),
+  ('Rocket',            '🌿', 'vegetable'),
+  ('Radicchio',         '🥬', 'vegetable'),
+  ('Endive',            '🥬', 'vegetable'),
+  ('Watercress',        '🌿', 'vegetable'),
+  ('Baby Spinach',      '🌿', 'vegetable'),
+  ('Swiss Chard',       '🥬', 'vegetable'),
+  ('Silverbeet',        '🥬', 'vegetable'),
+  ('Bok Choy',          '🥬', 'vegetable'),
+  ('Chinese Broccoli',  '🥦', 'vegetable'),
+
+  -- ── Cabbage variations ────────────────────────────────────────────────────
+  ('Red Cabbage',       '🥬', 'vegetable'),
+  ('Savoy Cabbage',     '🥬', 'vegetable'),
+  ('Napa Cabbage',      '🥬', 'vegetable'),
+  ('Brussels Sprouts',  '🥦', 'vegetable'),
+
+  -- ── Other vegetables ──────────────────────────────────────────────────────
+  ('Asparagus',         '🌿', 'vegetable'),
+  ('Artichoke',         '🥦', 'vegetable'),
+  ('Aubergine',         '🍆', 'vegetable'),
+  ('Cauliflower',       '🥦', 'vegetable'),
+  ('Fennel',            '🌿', 'vegetable'),
+  ('Parsnip',           '🥕', 'vegetable'),
+  ('Radish',            '🌿', 'vegetable'),
+  ('Turnip',            '🌿', 'vegetable'),
+  ('Swede',             '🌿', 'vegetable'),
+  ('Celeriac',          '🌿', 'vegetable'),
+  ('Kohlrabi',          '🌿', 'vegetable'),
+  ('Okra',              '🌿', 'vegetable'),
+  ('Pumpkin',           '🎃', 'vegetable'),
+  ('Butternut Squash',  '🎃', 'vegetable'),
+  ('Acorn Squash',      '🎃', 'vegetable'),
+  ('Spaghetti Squash',  '🎃', 'vegetable'),
+  ('Broccolini',        '🥦', 'vegetable'),
+  ('Sugar Snap Peas',   '🫛', 'vegetable'),
+  ('Snow Peas',         '🫛', 'vegetable'),
+  ('Mangetout',         '🫛', 'vegetable'),
+  ('Bean Sprouts',      '🌱', 'vegetable'),
+  ('Bamboo Shoots',     '🌿', 'vegetable'),
+  ('Water Chestnut',    '🌰', 'vegetable'),
+  ('Daikon',            '🌿', 'vegetable'),
+  ('Purple Sweet Potato','🍠','vegetable'),
+  ('Yam',               '🍠', 'vegetable'),
+  ('Taro',              '🍠', 'vegetable'),
+
+  -- ── Apple / grape variations ──────────────────────────────────────────────
+  ('Red Apple',         '🍎', 'fruit'),
+  ('Green Apple',       '🍏', 'fruit'),
+  ('Red Grapes',        '🍇', 'fruit'),
+  ('Green Grapes',      '🍇', 'fruit'),
+  ('Black Grapes',      '🍇', 'fruit'),
+
+  -- ── Citrus ────────────────────────────────────────────────────────────────
+  ('Blood Orange',      '🍊', 'fruit'),
+  ('Mandarin',          '🍊', 'fruit'),
+  ('Clementine',        '🍊', 'fruit'),
+  ('Tangerine',         '🍊', 'fruit'),
+  ('Grapefruit',        '🍊', 'fruit'),
+  ('Pomelo',            '🍊', 'fruit'),
+  ('Kumquat',           '🍊', 'fruit'),
+  ('Yuzu',              '🍋', 'fruit'),
+
+  -- ── Berries ───────────────────────────────────────────────────────────────
+  ('Raspberry',         '🍓', 'fruit'),
+  ('Blackberry',        '🫐', 'fruit'),
+  ('Cranberry',         '🍓', 'fruit'),
+  ('Blackcurrant',      '🫐', 'fruit'),
+  ('Redcurrant',        '🍓', 'fruit'),
+  ('Gooseberry',        '🍓', 'fruit'),
+  ('Mulberry',          '🫐', 'fruit'),
+  ('Acai',              '🫐', 'fruit'),
+  ('Goji Berry',        '🍓', 'fruit'),
+
+  -- ── Stone fruits ──────────────────────────────────────────────────────────
+  ('Apricot',           '🍑', 'fruit'),
+  ('Cherry',            '🍒', 'fruit'),
+  ('Nectarine',         '🍑', 'fruit'),
+  ('Plum',              '🍑', 'fruit'),
+  ('Prune',             '🍑', 'fruit'),
+  ('Lychee',            '🍈', 'fruit'),
+
+  -- ── Tropical fruits ───────────────────────────────────────────────────────
+  ('Papaya',            '🍈', 'fruit'),
+  ('Guava',             '🍈', 'fruit'),
+  ('Passionfruit',      '🍈', 'fruit'),
+  ('Dragon Fruit',      '🐉', 'fruit'),
+  ('Jackfruit',         '🍈', 'fruit'),
+  ('Coconut',           '🥥', 'fruit'),
+  ('Rambutan',          '🍈', 'fruit'),
+  ('Longan',            '🍈', 'fruit'),
+  ('Durian',            '🍈', 'fruit'),
+  ('Starfruit',         '⭐', 'fruit'),
+  ('Tamarind',          '🍈', 'fruit'),
+
+  -- ── Other fruits ──────────────────────────────────────────────────────────
+  ('Fig',               '🍈', 'fruit'),
+  ('Pomegranate',       '🍎', 'fruit'),
+  ('Persimmon',         '🍊', 'fruit'),
+  ('Quince',            '🍐', 'fruit'),
+  ('Melon',             '🍈', 'fruit'),
+  ('Honeydew',          '🍈', 'fruit'),
+  ('Cantaloupe',        '🍈', 'fruit'),
+
+  -- ── Herbs ─────────────────────────────────────────────────────────────────
+  ('Sage',              '🌿', 'herb'),
+  ('Tarragon',          '🌿', 'herb'),
+  ('Marjoram',          '🌿', 'herb'),
+  ('Chervil',           '🌿', 'herb'),
+  ('Bay Leaf',          '🌿', 'herb'),
+  ('Lemongrass',        '🌿', 'herb'),
+  ('Kaffir Lime Leaf',  '🌿', 'herb'),
+  ('Curry Leaf',        '🌿', 'herb'),
+  ('Vietnamese Mint',   '🌿', 'herb'),
+  ('Lemon Balm',        '🌿', 'herb'),
+  ('Lavender',          '💜', 'herb'),
+  ('Pandan',            '🌿', 'herb'),
+
+  -- ── Spices ────────────────────────────────────────────────────────────────
+  ('Black Pepper',      '🌑', 'spice'),
+  ('White Pepper',      '⚪', 'spice'),
+  ('Cayenne',           '🌶️', 'spice'),
+  ('Smoked Paprika',    '🌶️', 'spice'),
+  ('Chilli Flakes',     '🌶️', 'spice'),
+  ('Cloves',            '🌰', 'spice'),
+  ('Nutmeg',            '🌰', 'spice'),
+  ('Mace',              '🌰', 'spice'),
+  ('Star Anise',        '⭐', 'spice'),
+  ('Allspice',          '🌰', 'spice'),
+  ('Fenugreek',         '🌿', 'spice'),
+  ('Mustard Seed',      '🌿', 'spice'),
+  ('Coriander Seed',    '🌿', 'spice'),
+  ('Sumac',             '🌶️', 'spice'),
+  ('Saffron',           '🌼', 'spice'),
+  ('Vanilla',           '🌿', 'spice'),
+  ('Szechuan Pepper',   '🌶️', 'spice'),
+  ('Za''atar',          '🌿', 'spice'),
+  ('Harissa',           '🌶️', 'spice'),
+
+  -- ── Nuts ──────────────────────────────────────────────────────────────────
+  ('Hazelnut',          '🌰', 'nut'),
+  ('Pecan',             '🌰', 'nut'),
+  ('Brazil Nut',        '🌰', 'nut'),
+  ('Macadamia',         '🌰', 'nut'),
+  ('Pine Nut',          '🌰', 'nut'),
+  ('Chestnut',          '🌰', 'nut'),
+  ('Tiger Nut',         '🌰', 'nut'),
+
+  -- ── Seeds ─────────────────────────────────────────────────────────────────
+  ('Hemp Seeds',        '🌱', 'seed'),
+  ('Poppy Seeds',       '🌿', 'seed'),
+  ('Caraway Seeds',     '🌿', 'seed'),
+  ('Fennel Seeds',      '🌿', 'seed'),
+  ('Nigella Seeds',     '🌿', 'seed'),
+  ('Mustard Seeds',     '🌿', 'seed'),
+
+  -- ── Legumes ───────────────────────────────────────────────────────────────
+  ('Green Beans',       '🫛', 'legume'),
+  ('French Beans',      '🫛', 'legume'),
+  ('Runner Beans',      '🫛', 'legume'),
+  ('Broad Beans',       '🫛', 'legume'),
+  ('Butter Beans',      '🫘', 'legume'),
+  ('Cannellini Beans',  '🫘', 'legume'),
+  ('Pinto Beans',       '🫘', 'legume'),
+  ('Navy Beans',        '🫘', 'legume'),
+  ('Mung Beans',        '🫘', 'legume'),
+  ('Adzuki Beans',      '🫘', 'legume'),
+  ('Black-eyed Peas',   '🫘', 'legume'),
+  ('Split Peas',        '🫘', 'legume'),
+  ('Soybeans',          '🫘', 'legume'),
+  ('Tempeh',            '🧊', 'legume'),
+
+  -- ── Grains ────────────────────────────────────────────────────────────────
+  ('White Rice',        '🍚', 'grain'),
+  ('Basmati Rice',      '🍚', 'grain'),
+  ('Jasmine Rice',      '🍚', 'grain'),
+  ('Wild Rice',         '🍚', 'grain'),
+  ('Black Rice',        '🍚', 'grain'),
+  ('Millet',            '🌾', 'grain'),
+  ('Spelt',             '🌾', 'grain'),
+  ('Rye',               '🌾', 'grain'),
+  ('Farro',             '🌾', 'grain'),
+  ('Freekeh',           '🌾', 'grain'),
+  ('Bulgur',            '🌾', 'grain'),
+  ('Couscous',          '🌾', 'grain'),
+  ('Amaranth',          '🌾', 'grain'),
+  ('Teff',              '🌾', 'grain'),
+  ('Sorghum',           '🌾', 'grain'),
+  ('Polenta',           '🌽', 'grain')
+
+on conflict (name) do nothing;
