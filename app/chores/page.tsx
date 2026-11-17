@@ -34,6 +34,7 @@ import {
   type Chore,
 } from "./_utils"
 import { ChoreSheet } from "./_chore-sheet"
+import { MemberAvatar } from "@/components/member-avatar"
 import { WeeklySummary } from "./_weekly-summary"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
@@ -82,6 +83,10 @@ export default function ChoresPage() {
   // Weekly summary overlay
   const [summaryOpen, setSummaryOpen] = useState(false)
 
+  // Pocket money balances: memberId -> all-time earned minus payouts
+  const [balances, setBalances] = useState<Map<string, number>>(new Map())
+  const [payoutsAvailable, setPayoutsAvailable] = useState(false)
+
   // Swipe tracking for mobile day navigation
   const swipeStartX  = useRef<number | null>(null)
   const swipeStartY  = useRef<number | null>(null)
@@ -97,7 +102,7 @@ export default function ChoresPage() {
   const fetchMembers = useCallback(async () => {
     const { data } = await supabase
       .from("family_members")
-      .select("id, name, avatar_emoji, color")
+      .select("id, name, avatar_emoji, color, is_child")
       .order("created_at")
     setMembers(data ?? [])
   }, [supabase])
@@ -141,6 +146,42 @@ export default function ChoresPage() {
   }, [supabase])
 
   useEffect(() => { fetchStreaks() }, [fetchStreaks])
+
+  // ── Pocket money balances ─────────────────────────────────────────────────
+
+  const fetchBalances = useCallback(async () => {
+    const [{ data: earned }, { data: paid, error: paidError }] = await Promise.all([
+      supabase.from("chores").select("assigned_to, pocket_money_value").eq("completed", true).gt("pocket_money_value", 0),
+      supabase.from("pocket_money_payouts").select("member_id, amount"),
+    ])
+    setPayoutsAvailable(!paidError)
+    const map = new Map<string, number>()
+    for (const r of (earned ?? []) as { assigned_to: string | null; pocket_money_value: number }[]) {
+      if (!r.assigned_to) continue
+      map.set(r.assigned_to, (map.get(r.assigned_to) ?? 0) + Number(r.pocket_money_value))
+    }
+    for (const r of (paidError ? [] : paid ?? []) as { member_id: string; amount: number }[]) {
+      map.set(r.member_id, (map.get(r.member_id) ?? 0) - Number(r.amount))
+    }
+    map.forEach((v, k) => map.set(k, Math.round(v * 100) / 100))
+    setBalances(map)
+  }, [supabase])
+
+  // Recalculate whenever this week's tasks change (ticks, edits, realtime)
+  useEffect(() => { fetchBalances() }, [fetchBalances, chores])
+
+  async function resetBalance(member: FamilyMember, amount: number): Promise<boolean> {
+    const { error } = await supabase
+      .from("pocket_money_payouts")
+      .insert({ member_id: member.id, amount, note: "Balance reset" })
+    if (error) {
+      toast.error("Couldn't reset the balance. Please try again.")
+      return false
+    }
+    toast.success(`${member.name}'s balance reset (S$${amount.toFixed(2)} paid)`)
+    fetchBalances()
+    return true
+  }
 
   // ── Realtime ──────────────────────────────────────────────────────────────
 
@@ -306,13 +347,21 @@ export default function ChoresPage() {
     )
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render helpers ─────────────────────────────────────────────────────────
 
-  // Format week range label
   const weekLabel = (() => {
     const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }
-    return `${weekStart.toLocaleDateString("en-AU", opts)} – ${weekEnd.toLocaleDateString("en-AU", opts)}, ${weekEnd.getFullYear()}`
+    return `${weekStart.toLocaleDateString("en-GB", opts)} to ${weekEnd.toLocaleDateString("en-GB", opts)}`
   })()
+
+  const weekTotal = chores.length
+  const weekDone  = chores.filter((c) => c.completed).length
+  const weekPct   = weekTotal > 0 ? Math.round((weekDone / weekTotal) * 100) : 0
+
+  const rows = [
+    ...members.map((m) => ({ key: m.id, member: m as FamilyMember | null })),
+    ...(showUnassigned ? [{ key: "__unassigned__", member: null as FamilyMember | null }] : []),
+  ]
 
   // ── Mobile day data ────────────────────────────────────────────────────────
 
@@ -320,303 +369,240 @@ export default function ChoresPage() {
   const mobileDateStr = toDateStr(mobileDay)
   const isMobileToday = toDateStr(mobileDay) === toDateStr(today)
 
-  // Chores for the selected mobile day, grouped by member
   const mobileMemberGroups = (() => {
     const groups: { member: FamilyMember | null; key: string; chores: Chore[] }[] = []
-    const seen = new Set<string>()
-    // Member rows
     for (const member of members) {
-      const mc = chores.filter(
-        (c) => c.due_date === mobileDateStr && c.assigned_to === member.id,
-      )
-      if (mc.length > 0) { groups.push({ member, key: member.id, chores: mc }); seen.add(member.id) }
+      const mc = chores.filter((c) => c.due_date === mobileDateStr && c.assigned_to === member.id)
+      if (mc.length > 0) groups.push({ member, key: member.id, chores: mc })
     }
-    // Unassigned
-    const unassigned = chores.filter(
-      (c) => c.due_date === mobileDateStr && !c.assigned_to,
-    )
+    const unassigned = chores.filter((c) => c.due_date === mobileDateStr && !c.assigned_to)
     if (unassigned.length > 0) groups.push({ member: null, key: "__unassigned__", chores: unassigned })
     return groups
   })()
 
-  return (
-    <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
+  const walletMembers = members.filter((m) =>
+    m.is_child || Math.abs(balances.get(m.id) ?? 0) > 0.001 || weeklyEarnings.has(m.id),
+  )
 
-      {/* ── Desktop Header ───────────────────────────────────────────────── */}
-      <div className="hidden lg:flex items-center gap-2 shrink-0 flex-wrap">
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={prevWeek}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={nextWeek}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <h2 className="text-base font-semibold shrink-0">{weekLabel}</h2>
-        {!isThisWeek && (
-          <Button variant="outline" size="sm" className="h-8" onClick={goThisWeek}>
-            This week
+  const pocketMoney = (
+    <PocketMoneyPanel
+      members={walletMembers}
+      balances={balances}
+      weeklyEarnings={weeklyEarnings}
+      payoutsAvailable={payoutsAvailable}
+      onReset={resetBalance}
+    />
+  )
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex flex-col lg:h-full p-4 lg:px-8 lg:py-7 gap-4 lg:gap-5">
+
+      {/* ── Desktop header ───────────────────────────────────────────────── */}
+      <div className="hidden lg:flex items-center gap-3 shrink-0">
+        <div className="mr-2">
+          <h1 className="font-display text-[34px] font-semibold tracking-tight leading-tight">Tasks</h1>
+          <p className="text-[15px] text-muted-foreground">{weekLabel}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={prevWeek} aria-label="Previous week">
+            <ChevronLeft className="size-5" />
           </Button>
-        )}
-        {loading && (
-          <Skeleton className="h-4 w-16 rounded" />
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 ml-auto"
-          onClick={() => setSummaryOpen(true)}
-        >
-          <BarChart2 className="h-3.5 w-3.5" />
-          Summary
-        </Button>
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={nextWeek} aria-label="Next week">
+            <ChevronRight className="size-5" />
+          </Button>
+          {!isThisWeek && (
+            <Button variant="outline" className="h-11 px-4 rounded-xl bg-card" onClick={goThisWeek}>This week</Button>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-4">
+          {weekTotal > 0 && (
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-sm font-semibold text-foreground/80 tabular-nums">{weekDone} of {weekTotal} done this week</span>
+              <span className="h-2 w-48 rounded-full bg-secondary overflow-hidden">
+                <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${weekPct}%` }} />
+              </span>
+            </div>
+          )}
+          <Button variant="outline" className="h-11 px-4 rounded-xl bg-card gap-2" onClick={() => setSummaryOpen(true)}>
+            <BarChart2 className="size-4" />
+            Summary
+          </Button>
+          <Button className="h-11 px-4 rounded-xl gap-2" onClick={() => openCreate()}>
+            <Plus className="size-[18px]" />
+            New task
+          </Button>
+        </div>
       </div>
 
-      {/* ── Mobile Header ────────────────────────────────────────────────── */}
+      {/* ── Mobile header ────────────────────────────────────────────────── */}
       <div className="lg:hidden flex items-center gap-2 shrink-0">
-        <Button variant="outline" size="icon" className="h-11 w-11" onClick={mobilePrevDay}>
-          <ChevronLeft className="h-5 w-5" />
+        <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={mobilePrevDay} aria-label="Previous day">
+          <ChevronLeft className="size-5" />
         </Button>
         <div className="flex-1 text-center">
-          <p className={cn("text-lg font-bold", isMobileToday && "text-primary")}>
-            {isMobileToday ? "Today" : mobileDay.toLocaleDateString("en-AU", { weekday: "long" })}
+          <p className={cn("font-display text-[22px] font-semibold leading-tight", isMobileToday && "text-primary")}>
+            {isMobileToday ? "Today" : mobileDay.toLocaleDateString("en-GB", { weekday: "long" })}
           </p>
           <p className="text-sm text-muted-foreground">
-            {mobileDay.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })}
+            {mobileDay.toLocaleDateString("en-GB", { day: "numeric", month: "long" })}
           </p>
         </div>
-        <Button variant="outline" size="icon" className="h-11 w-11" onClick={mobileNextDay}>
-          <ChevronRight className="h-5 w-5" />
+        <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={mobileNextDay} aria-label="Next day">
+          <ChevronRight className="size-5" />
         </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-11 w-11"
-          onClick={() => setSummaryOpen(true)}
-          aria-label="Weekly summary"
-        >
-          <BarChart2 className="h-5 w-5" />
+        <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={() => setSummaryOpen(true)} aria-label="Weekly summary">
+          <BarChart2 className="size-5" />
         </Button>
       </div>
 
-      {/* ── Mobile: Day view with swipe ──────────────────────────────────── */}
-      <div
-        className="lg:hidden flex-1 overflow-y-auto rounded-lg border bg-background"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
+      {/* ── Mobile: day view with swipe ──────────────────────────────────── */}
+      <div className="lg:hidden flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         {loading ? (
-          <div className="px-4 py-4 space-y-4">
-            {[1, 2].map((i) => (
-              <div key={i} className="space-y-2">
-                <Skeleton className="h-5 w-24 rounded" />
-                <Skeleton className="h-11 rounded-lg" />
-                <Skeleton className="h-11 rounded-lg" />
-              </div>
-            ))}
+          <div className="space-y-3">
+            {[1, 2].map((i) => <Skeleton key={i} className="h-36 rounded-3xl" />)}
           </div>
         ) : mobileMemberGroups.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-            <CalendarDays className="h-10 w-10 opacity-30" />
-            <p className="text-sm">No tasks {isMobileToday ? "today" : "this day"}</p>
-            <Button size="sm" variant="outline" onClick={() => openCreate(mobileDateStr)}>
-              Add a task
-            </Button>
+          <div className="rounded-3xl border-[1.5px] border-dashed border-input flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground">
+            <CalendarDays className="size-9" />
+            <p className="text-base font-semibold">No tasks {isMobileToday ? "today" : "this day"}</p>
+            <Button variant="outline" className="rounded-xl bg-card" onClick={() => openCreate(mobileDateStr)}>Add a task</Button>
           </div>
         ) : (
-          <div className="divide-y">
-            {mobileMemberGroups.map(({ member, key, chores: mc }) => (
-              <div key={key} className="px-4 py-4">
-                {/* Member heading */}
-                <div className="flex items-center gap-2 mb-3">
-                  {member?.avatar_emoji && (
-                    <span className="text-xl leading-none">{member.avatar_emoji}</span>
-                  )}
-                  <span
-                    className="text-sm font-semibold"
-                    style={member?.color ? { color: member.color } : undefined}
-                  >
-                    {member?.name ?? "Unassigned"}
-                  </span>
-                  {member && (() => {
-                    const s = streaks.get(member.id)
-                    return s && s.streak_count >= 1
-                      ? <StreakBadge streak={s.streak_count} longest={s.longest_streak} />
-                      : null
-                  })()}
-                  {member && weeklyEarnings.has(member.id) && (
-                    <span
-                      className="ml-auto text-sm font-semibold tabular-nums"
-                      style={{ color: member.color ?? "#6366f1" }}
-                    >
-                      S${(weeklyEarnings.get(member.id) ?? 0).toFixed(2)}
-                    </span>
-                  )}
+          mobileMemberGroups.map(({ member, key, chores: mc }) => {
+            const done = mc.filter((c) => c.completed).length
+            const s = member ? streaks.get(member.id) : undefined
+            return (
+              <section key={key} className="rounded-3xl bg-card border border-border p-4 flex flex-col gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <MemberAvatar member={member ?? { name: "?" }} className="size-9 text-[17px]" />
+                  <span className="text-[17px] font-semibold">{member?.name ?? "Anyone"}</span>
+                  {s && s.streak_count >= 1 && <StreakBadge streak={s.streak_count} longest={s.longest_streak} />}
+                  <span className="ml-auto text-sm font-semibold text-muted-foreground tabular-nums">{done}/{mc.length}</span>
                 </div>
-                {/* Chore chips */}
-                <div className="flex flex-col gap-2">
-                  {mc.map((chore) => (
-                    <ChoreChip
-                      key={chore.id}
-                      chore={chore}
-                      member={member}
-                      onToggle={toggleComplete}
-                      onEdit={openEdit}
-                      onDelete={setDeleteTarget}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+                {mc.map((chore) => (
+                  <ChoreChip key={chore.id} chore={chore} member={member} onToggle={toggleComplete} onEdit={openEdit} onDelete={setDeleteTarget} />
+                ))}
+              </section>
+            )
+          })
         )}
+        {walletMembers.length > 0 && pocketMoney}
       </div>
 
-      {/* ── Desktop Grid ──────────────────────────────────────────────────── */}
+      {/* ── Desktop: week board + pocket money ──────────────────────────── */}
       <ErrorBoundary label="Tasks grid">
-      <div className="hidden lg:flex flex-1 overflow-auto rounded-lg border bg-background">
-        <table className="w-full min-w-[640px] border-collapse table-fixed">
-          {/* Column headers */}
-          <thead>
-            <tr>
-              {/* Member column */}
-              <th className="w-28 lg:w-36 border-b border-r bg-muted/40 px-3 py-2 text-left text-xs font-medium text-muted-foreground">
-                Person
-              </th>
-              {days.map((day, i) => {
-                const isToday = toDateStr(day) === toDateStr(today)
-                return (
-                  <th
-                    key={i}
-                    className={cn(
-                      "border-b border-r last:border-r-0 px-2 py-2 text-center text-xs font-medium",
-                      isToday ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground",
-                    )}
-                  >
-                    <div className="font-bold">{WEEKDAY_LABELS[i]}</div>
-                    <div className={cn(
-                      "text-[10px] font-normal",
-                      isToday ? "opacity-80" : "text-muted-foreground/70",
-                    )}>
-                      {day.getDate()}
-                    </div>
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
+      <div className="hidden lg:grid lg:flex-1 lg:min-h-0 gap-5" style={{ gridTemplateColumns: walletMembers.length > 0 ? "minmax(0,1fr) 272px" : "minmax(0,1fr)" }}>
+        <section className="flex flex-col min-h-0 rounded-[28px] bg-card border border-border p-3">
+          {/* Day headers */}
+          <div className="grid gap-1.5 shrink-0 pb-1.5" style={{ gridTemplateColumns: "104px repeat(7, minmax(0,1fr))" }}>
+            <span />
+            {days.map((day, i) => {
+              const isToday = i === todayIdx
+              return (
+                <div key={i} className={cn(
+                  "flex flex-col items-center gap-0.5 rounded-xl py-2",
+                  isToday ? "bg-foreground text-background" : "text-foreground/80",
+                )}>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.06em]">{WEEKDAY_LABELS[i]}</span>
+                  <span className="font-display text-[19px] font-semibold leading-none">{day.getDate()}</span>
+                </div>
+              )
+            })}
+          </div>
 
-          <tbody>
-            {/* Member rows */}
-            {[...members.map((m) => ({ key: m.id, member: m })),
-              ...(showUnassigned ? [{ key: "__unassigned__", member: null }] : [])
-            ].map(({ key, member }) => (
-              <tr key={key} className="group/row">
-                {/* Member cell */}
-                <td className="border-b border-r px-3 py-2 align-top">
-                  <div className="flex flex-col gap-1">
+          {/* Rows */}
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+            {loading && members.length === 0 ? (
+              <div className="flex flex-col gap-3 p-2">
+                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
+              </div>
+            ) : members.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground py-16">
+                <ClipboardList className="size-10" />
+                <p className="text-base font-semibold">No family members yet</p>
+                <p className="text-sm">Add members in Settings to start tracking tasks.</p>
+              </div>
+            ) : rows.map(({ key, member }) => {
+              const rowChores = Array.from(cellMap.get(key)?.values() ?? []).flat()
+              const rowDone = rowChores.filter((c) => c.completed).length
+              const hasTodayChores = todayIdx >= 0 && (cellMap.get(key)?.get(todayIdx)?.length ?? 0) > 0
+              const s = member && hasTodayChores ? streaks.get(member.id) : undefined
+              return (
+                <div
+                  key={key}
+                  className="grid gap-1.5 border-t border-border/70 py-1.5 min-h-[104px] flex-1"
+                  style={{ gridTemplateColumns: "104px repeat(7, minmax(0,1fr))" }}
+                >
+                  <div className="flex flex-col gap-1.5 px-2 py-1.5 min-w-0">
                     {member ? (
                       <>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-base leading-none">{member.avatar_emoji}</span>
-                          <span
-                            className="text-xs font-medium truncate"
-                            style={{ color: member.color ?? undefined }}
-                          >
-                            {member.name}
-                          </span>
-                          {(() => {
-                            const hasTodayChores = todayIdx >= 0 && (cellMap.get(member.id)?.get(todayIdx)?.length ?? 0) > 0
-                            const s = hasTodayChores ? streaks.get(member.id) : undefined
-                            return s && s.streak_count >= 1
-                              ? <StreakBadge streak={s.streak_count} longest={s.longest_streak} />
-                              : null
-                          })()}
+                        <MemberAvatar member={member} className="size-10 text-[18px]" />
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className="text-[15px] font-semibold truncate">{member.name}</span>
+                          {s && s.streak_count >= 1 && <StreakBadge streak={s.streak_count} longest={s.longest_streak} />}
                         </div>
-                        {/* Weekly earnings — only shown when there's at least one valued chore */}
-                        {weeklyEarnings.has(member.id) && (
-                          <span
-                            className="text-[11px] font-semibold tabular-nums"
-                            style={{ color: member.color ?? "#6366f1" }}
-                          >
-                            S${(weeklyEarnings.get(member.id) ?? 0).toFixed(2)}
-                          </span>
+                        {rowChores.length > 0 && (
+                          <span className="text-[12px] text-muted-foreground tabular-nums">{rowDone} of {rowChores.length} done</span>
                         )}
                       </>
                     ) : (
-                      <span className="text-xs text-muted-foreground italic">Unassigned</span>
+                      <span className="text-sm font-medium text-muted-foreground pt-2">Anyone</span>
                     )}
                   </div>
-                </td>
 
-                {/* Day cells */}
-                {days.map((day, di) => {
-                  const dayChores = cellMap.get(key)?.get(di) ?? []
-                  const isToday = toDateStr(day) === toDateStr(today)
-
-                  return (
-                    <td
-                      key={di}
-                      className={cn(
-                        "border-b border-r last:border-r-0 px-1.5 py-1.5 align-top",
-                        "min-h-[72px] cursor-pointer group/cell transition-colors",
-                        isToday ? "bg-primary/10 hover:bg-primary/15" : "hover:bg-muted/30",
-                      )}
-                      onClick={() => openCreate(toDateStr(day), member?.id)}
-                    >
-                      <div className="flex flex-col gap-1">
+                  {days.map((day, di) => {
+                    const dayChores = cellMap.get(key)?.get(di) ?? []
+                    const isToday = di === todayIdx
+                    return (
+                      <div
+                        key={di}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Add a task for ${member?.name ?? "anyone"} on ${day.toLocaleDateString("en-GB", { weekday: "long" })}`}
+                        onClick={() => openCreate(toDateStr(day), member?.id)}
+                        onKeyDown={(e) => { if (e.key === "Enter") openCreate(toDateStr(day), member?.id) }}
+                        className={cn(
+                          "group/cell flex flex-col gap-1 rounded-2xl p-1.5 min-w-0 cursor-pointer transition-colors",
+                          isToday ? "bg-accent/50 hover:bg-accent/80" : "hover:bg-secondary/60",
+                        )}
+                      >
                         {dayChores.map((chore) => (
-                          <ChoreChip
-                            key={chore.id}
-                            chore={chore}
-                            member={member}
-                            onToggle={toggleComplete}
-                            onEdit={openEdit}
-                            onDelete={setDeleteTarget}
-                          />
+                          <ChoreChip key={chore.id} chore={chore} member={member} onToggle={toggleComplete} onEdit={openEdit} onDelete={setDeleteTarget} />
                         ))}
+                        {dayChores.length === 0 && (
+                          <span className="m-auto opacity-0 group-hover/cell:opacity-100 transition-opacity text-muted-foreground">
+                            <Plus className="size-4" />
+                          </span>
+                        )}
                       </div>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        </section>
 
-            {/* Empty state */}
-            {members.length === 0 && !loading && (
-              <tr>
-                <td colSpan={8} className="py-16 text-center">
-                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                    <ClipboardList className="h-10 w-10 opacity-30" />
-                    <p className="text-sm font-medium">No family members yet</p>
-                    <p className="text-xs">Add members in Settings to start tracking tasks.</p>
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {walletMembers.length > 0 && <aside className="min-h-0 overflow-y-auto">{pocketMoney}</aside>}
       </div>
       </ErrorBoundary>
 
-      {/* ── FAB ──────────────────────────────────────────────────────────── */}
+      {/* ── Mobile FAB ───────────────────────────────────────────────────── */}
       <button
-        onClick={() => openCreate(
-          // On mobile, pre-fill the currently viewed day
-          typeof window !== "undefined" && window.innerWidth < 1024 ? mobileDateStr : undefined,
-        )}
+        onClick={() => openCreate(mobileDateStr)}
         className={cn(
-          "fixed z-40 flex items-center justify-center w-14 h-14 rounded-full shadow-lg",
-          "bg-primary text-primary-foreground",
-          "hover:bg-primary/90 active:scale-95 transition-all",
-          // Mobile: above bottom nav + safe area; Desktop: bottom-right
-          "bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] right-5",
-          "lg:bottom-6 lg:right-6",
+          "lg:hidden fixed z-30 flex items-center justify-center size-14 rounded-full shadow-lg",
+          "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all",
+          "bottom-[calc(5.5rem+env(safe-area-inset-bottom,0px))] right-5",
         )}
         aria-label="Add task"
       >
-        <Plus className="h-6 w-6" />
+        <Plus className="size-6" />
       </button>
 
-      {/* ── Chore sheet ───────────────────────────────────────────────────── */}
       <ChoreSheet
         open={sheetOpen}
         onClose={closeSheet}
@@ -626,16 +612,10 @@ export default function ChoresPage() {
         defaultMemberId={defaultMemberId}
       />
 
-      {/* ── Weekly summary overlay ───────────────────────────────────────── */}
       {summaryOpen && (
-        <WeeklySummary
-          members={members}
-          initialWeekStart={weekStart}
-          onClose={() => setSummaryOpen(false)}
-        />
+        <WeeklySummary members={members} initialWeekStart={weekStart} onClose={() => setSummaryOpen(false)} />
       )}
 
-      {/* ── Delete confirm ────────────────────────────────────────────────── */}
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -648,24 +628,20 @@ export default function ChoresPage() {
           <DialogFooter className={cn("gap-2", deleteTarget?.recur_series_id && "flex-col sm:flex-col")}>
             {deleteTarget?.recur_series_id ? (
               <>
-                <Button variant="outline" size="sm" onClick={() => handleDelete("this")} disabled={deleting}>
-                  Delete this task only
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleDelete("future")} disabled={deleting}>
-                  Delete this + all future
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => handleDelete("all")} disabled={deleting}>
-                  {deleting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                <Button variant="outline" onClick={() => handleDelete("this")} disabled={deleting}>Delete this task only</Button>
+                <Button variant="outline" onClick={() => handleDelete("future")} disabled={deleting}>Delete this and all future</Button>
+                <Button variant="destructive" onClick={() => handleDelete("all")} disabled={deleting}>
+                  {deleting && <Loader2 className="size-4 mr-1.5 animate-spin" />}
                   Delete entire series
                 </Button>
               </>
             ) : (
               <>
                 <DialogClose>
-                  <Button variant="outline" size="sm">Cancel</Button>
+                  <Button variant="outline">Cancel</Button>
                 </DialogClose>
-                <Button variant="destructive" size="sm" onClick={() => handleDelete("this")} disabled={deleting}>
-                  {deleting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                <Button variant="destructive" onClick={() => handleDelete("this")} disabled={deleting}>
+                  {deleting && <Loader2 className="size-4 mr-1.5 animate-spin" />}
                   Delete
                 </Button>
               </>
@@ -674,6 +650,73 @@ export default function ChoresPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// ── Pocket money panel ─────────────────────────────────────────────────────────
+
+function PocketMoneyPanel({
+  members, balances, weeklyEarnings, payoutsAvailable, onReset,
+}: {
+  members: FamilyMember[]
+  balances: Map<string, number>
+  weeklyEarnings: Map<string, number>
+  payoutsAvailable: boolean
+  onReset: (member: FamilyMember, amount: number) => Promise<boolean>
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <section className="rounded-[28px] bg-card border border-border p-5 flex flex-col gap-3.5">
+      <h2 className="font-display text-[22px] font-semibold">Pocket money</h2>
+      {members.map((m) => {
+        const balance = balances.get(m.id) ?? 0
+        const week = weeklyEarnings.get(m.id) ?? 0
+        const color = m.color ?? "#B85F1A"
+        const isConfirming = confirming === m.id
+        return (
+          <div key={m.id} className="rounded-2xl p-4 flex flex-col gap-2.5" style={{ backgroundColor: `${color}1F` }}>
+            <div className="flex items-center gap-2.5">
+              <MemberAvatar member={m} className="size-9 text-[16px]" />
+              <span className="text-[15px] font-semibold">{m.name}</span>
+              <span className="ml-auto font-display text-[26px] font-semibold tabular-nums">S${balance.toFixed(2)}</span>
+            </div>
+            <span className="text-[13px] text-muted-foreground">S${week.toFixed(2)} earned this week</span>
+            {payoutsAvailable && balance > 0 && (
+              isConfirming ? (
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1 rounded-xl bg-card" onClick={() => setConfirming(null)} disabled={busy}>Cancel</Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-[1.4] rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true)
+                      const ok = await onReset(m, balance)
+                      setBusy(false)
+                      if (ok) setConfirming(null)
+                    }}
+                  >
+                    {busy && <Loader2 className="size-4 animate-spin" />}
+                    Paid S${balance.toFixed(2)}, reset
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" className="rounded-xl bg-card" onClick={() => setConfirming(m.id)}>
+                  Reset to zero
+                </Button>
+              )
+            )}
+          </div>
+        )
+      })}
+      {!payoutsAvailable && (
+        <p className="text-[13px] text-muted-foreground leading-snug">
+          Balances show everything earned so far. To reset them after paying out, run the pocket money database update in Supabase.
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -754,35 +797,37 @@ function ChoreChip({
       <PopoverTrigger
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          "w-full text-left rounded border transition-all duration-200",
-          "min-h-[36px] lg:min-h-[44px]",
-          "px-2 py-1.5 lg:px-2.5 lg:py-2",
+          "w-full text-left rounded-xl border transition-all duration-200",
+          "min-h-[48px] lg:min-h-[38px]",
+          "px-3 py-2 lg:px-1.5 lg:py-1.5",
           chore.completed
-            ? "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900"
-            : "bg-background border-border hover:border-primary/40 hover:shadow-sm",
+            ? "bg-accent border-accent"
+            : "bg-card border-border hover:border-primary/40 hover:shadow-sm",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
       >
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-start gap-1.5 min-w-0">
           {chore.completed
-            ? <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-            : <Circle className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+            ? <CheckCircle2 className="size-5 lg:size-4 shrink-0 text-primary mt-px" />
+            : <Circle className="size-5 lg:size-4 shrink-0 text-muted-foreground/60 mt-px" />
           }
-          <span
-            className={cn(
-              "flex-1 min-w-0 truncate text-xs lg:text-sm font-medium leading-snug",
-              chore.completed && "line-through text-muted-foreground",
+          <span className="flex-1 min-w-0 flex flex-col lg:gap-0">
+            <span
+              className={cn(
+                "truncate lg:whitespace-normal lg:line-clamp-2 lg:[overflow-wrap:normal] lg:hyphens-auto text-[15px] lg:text-[12.5px] font-medium leading-snug",
+                chore.completed && "line-through text-muted-foreground",
+              )}
+            >
+              {chore.title}
+            </span>
+            {chore.pocket_money_value > 0 && (
+              <span className="text-[12px] lg:text-[11px] font-semibold text-[#8A4B12] dark:text-[#F0C08A] tabular-nums leading-tight">
+                S${chore.pocket_money_value.toFixed(2)}
+              </span>
             )}
-          >
-            {chore.title}
           </span>
           {chore.recur_series_id && (
-            <RefreshCw className="shrink-0 h-3 w-3 text-muted-foreground/50" aria-label="Recurring" />
-          )}
-          {chore.pocket_money_value > 0 && (
-            <span className="shrink-0 text-[10px] font-semibold" style={{ color: accentColor }}>
-              S${chore.pocket_money_value.toFixed(2)}
-            </span>
+            <RefreshCw className="shrink-0 size-3 mt-1 text-muted-foreground/50" aria-label="Recurring" />
           )}
         </div>
       </PopoverTrigger>
@@ -803,7 +848,7 @@ function ChoreChip({
             </p>
           )}
           {chore.completed && chore.completed_at && (
-            <p className="text-[11px] text-green-600 dark:text-green-400 mt-1">
+            <p className="text-[11px] text-primary mt-1">
               ✓ Done {new Date(chore.completed_at).toLocaleTimeString("en-AU", {
                 hour: "2-digit", minute: "2-digit",
               })}
@@ -845,7 +890,7 @@ function ChoreChip({
               "w-full h-11 text-sm font-semibold gap-2 transition-all",
               chore.completed
                 ? "bg-muted text-foreground hover:bg-muted/80"
-                : "bg-green-600 hover:bg-green-700 text-white",
+                : "bg-primary hover:bg-primary/90 text-primary-foreground",
             )}
             onClick={handleToggle}
             disabled={toggling}

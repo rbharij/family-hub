@@ -5,6 +5,7 @@ export interface FamilyMember {
   name: string
   avatar_emoji: string | null
   color: string | null
+  is_child?: boolean | null
 }
 
 export interface Chore {
