@@ -11,7 +11,7 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ]
 
-export function Clock() {
+export function Clock({ variant = "default" }: { variant?: "default" | "sidebar" }) {
   const [now, setNow] = useState<Date | null>(null)
 
   useEffect(() => {
@@ -29,9 +29,22 @@ export function Clock() {
   const month = MONTHS[now.getMonth()]
   const yyyy = now.getFullYear()
 
+  if (variant === "sidebar") {
+    return (
+      <div className="flex flex-col tabular-nums select-none">
+        <span className="font-display text-[40px] font-medium leading-none tracking-tight">
+          {hh}:{mm}
+        </span>
+        <span className="text-sm text-muted-foreground mt-1.5">
+          {day} {dd} {month}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col items-center tabular-nums select-none">
-      <span className="text-xl sm:text-2xl font-bold leading-none tracking-tight">
+      <span className="font-display text-xl sm:text-2xl font-semibold leading-none tracking-tight">
         {hh}:{mm}
       </span>
       <span className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 whitespace-nowrap">

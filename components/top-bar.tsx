@@ -12,10 +12,10 @@ export function TopBar() {
   const title = settings?.familyName ?? "Family Hub"
 
   return (
-    <header className="grid grid-cols-3 items-center h-14 px-4 border-b bg-background shrink-0">
+    <header className="lg:hidden grid grid-cols-3 items-center h-14 px-4 border-b border-border/70 bg-background/95 backdrop-blur shrink-0 sticky top-0 z-30 pt-safe">
       {/* Left — app title + connection status */}
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-base sm:text-lg font-bold tracking-tight truncate">
+        <span className="font-display text-lg font-semibold tracking-tight truncate">
           {title}
         </span>
         <ConnectionDot />

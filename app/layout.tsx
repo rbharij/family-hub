@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
+import { Inter, Bricolage_Grotesque } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ConnectionStatusProvider } from "@/lib/connection-status"
@@ -7,11 +7,17 @@ import { AppSettingsProvider } from "@/lib/app-settings-context"
 import { MessageCountProvider } from "@/lib/message-count-context"
 import { SetupWizard } from "@/components/setup-wizard"
 import { TopBar } from "@/components/top-bar"
-import { TopNavTabs, BottomNavTabs } from "@/components/nav-tabs"
+import { Sidebar, BottomNavTabs } from "@/components/nav-tabs"
 import { Toaster } from "@/components/ui/sonner"
 import { IdleTimeoutProvider } from "@/lib/idle-timeout-context"
 
-const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" })
+const display = Bricolage_Grotesque({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
+  display: "swap",
+})
 
 export const metadata: Metadata = {
   title: "Family Hub",
@@ -24,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-GB" suppressHydrationWarning className={`${inter.variable} ${display.variable}`}>
       <head>
         {/* Inline script: apply dark class before first paint to prevent flash */}
         <script
@@ -53,23 +59,24 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={inter.className}>
+      <body className="font-sans antialiased">
         <ThemeProvider>
           <ConnectionStatusProvider>
             <AppSettingsProvider>
               <IdleTimeoutProvider>
               <MessageCountProvider>
               {/*
-                Desktop (lg+): fixed-height shell — top bar + nav tabs + scrollable content.
-                Mobile: normal document flow — content scrolls, bottom nav is fixed.
+                Desktop (lg+): sidebar + scrollable content.
+                Mobile: top bar, content in normal flow, fixed bottom nav.
               */}
-              <div className="flex flex-col lg:h-screen bg-background text-foreground">
-                <TopBar />
-                <TopNavTabs />
-                {/* Mobile: pad below content for bottom nav + safe area. Desktop: no bottom nav. */}
-                <main className="flex-1 overflow-y-auto pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
-                  {children}
-                </main>
+              <div className="flex flex-col lg:flex-row lg:h-screen bg-background text-foreground">
+                <Sidebar />
+                <div className="flex-1 min-w-0 flex flex-col lg:h-screen">
+                  <TopBar />
+                  <main className="flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
+                    {children}
+                  </main>
+                </div>
                 <BottomNavTabs />
               </div>
               <SetupWizard />

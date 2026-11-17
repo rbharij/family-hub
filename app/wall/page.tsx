@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, CheckCircle2, Circle } from "lucide-react"
+import { X, CheckCircle2, Check, Flame, MessageSquare, RefreshCw, Soup, Cake, CalendarDays } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
@@ -117,12 +117,6 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit", hour12: true })
 }
 
-function dayChip(d: Date, todayStr: string): string {
-  const s = toDateStr(d)
-  if (s === todayStr) return "Today"
-  const wd = d.toLocaleDateString("en-AU", { weekday: "short" })
-  return `${wd} ${d.getDate()}`
-}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -284,159 +278,162 @@ export default function WallPage() {
   // Clock display
   const hh = String(now.getHours()).padStart(2, "0")
   const mm = String(now.getMinutes()).padStart(2, "0")
-  const dateLabel = now.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+  const dateLabel = now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+
+  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening"
+  const familyName = settings?.familyName ?? "Family Hub"
+  const doneToday = choresToday.filter(c => c.completed).length
+
+  const memberPlantCounts = members.map(m => ({
+    member: m,
+    count: new Set(confirmedWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)).size,
+  }))
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 bg-background text-foreground flex flex-col overflow-hidden select-none">
+    <div className="fixed inset-0 z-50 bg-background text-foreground flex flex-col gap-5 overflow-hidden select-none px-8 pt-7 pb-8">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="shrink-0 h-[60px] border-b bg-background flex items-center px-4 gap-3">
-        {/* Time */}
-        <span className="text-[30px] font-bold tabular-nums leading-none w-[100px] shrink-0">
-          {hh}:{mm}
-        </span>
-
-        {/* Family name — centre */}
-        <div className="flex-1 text-center">
-          <span className="text-lg font-semibold tracking-wide">
-            {settings?.familyName ?? "Family Hub"}
-          </span>
+      <header className="shrink-0 flex items-end justify-between gap-6">
+        <div className="min-w-0">
+          <p className="text-[17px] font-medium text-muted-foreground">{dateLabel}</p>
+          <h1 className="font-display text-[42px] font-semibold leading-tight tracking-tight truncate">
+            {greeting}
+            <span className="text-muted-foreground font-medium">, {familyName}</span>
+          </h1>
         </div>
 
-        {/* Weather */}
-        {weather && (
-          <div className="flex items-center gap-2 shrink-0 border-l pl-3">
-            <span className="text-[26px] leading-none">{weather.emoji}</span>
-            <div className="leading-tight">
-              <p className="text-[22px] font-bold tabular-nums leading-none">
-                {weather.temp}°
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                H:{weather.high}° L:{weather.low}°
-                {weather.rainChance > 20 && (
-                  <span className="ml-1 text-blue-400">💧{weather.rainChance}%</span>
-                )}
-              </p>
+        <div className="flex items-center gap-5 shrink-0">
+          {weather && (
+            <div className="flex items-center gap-3 rounded-2xl bg-card border border-border px-4 py-2.5">
+              <span className="text-[28px] leading-none" aria-hidden="true">{weather.emoji}</span>
+              <div className="leading-tight">
+                <p className="font-display text-[24px] font-semibold tabular-nums leading-none">{weather.temp}°</p>
+                <p className="text-[12px] text-muted-foreground mt-1 tabular-nums">
+                  {weather.high}° / {weather.low}°
+                  {weather.rainChance > 20 && <span className="ml-1.5">Rain {weather.rainChance}%</span>}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Date + Exit */}
-        <div className="flex items-center gap-3 shrink-0 border-l pl-3">
-          <span className="text-sm text-muted-foreground">{dateLabel}</span>
+          {members.length > 0 && (
+            <div className="flex -space-x-2" aria-label="Family members">
+              {members.map(m => (
+                <Avatar key={m.id} member={m} className="size-11 text-[18px] ring-[3px] ring-background" />
+              ))}
+            </div>
+          )}
+
+          <p className="font-display text-[64px] font-medium leading-none tracking-tight tabular-nums">
+            {hh}:{mm}
+          </p>
+
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Exit wall display"
+            className="flex items-center justify-center size-11 rounded-full border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
           >
-            <X className="h-4 w-4" />
-            Exit
+            <X className="size-5" />
           </button>
         </div>
       </header>
 
       {/* ── 3-column body ──────────────────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 grid overflow-hidden" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+      <div className="flex-1 min-h-0 grid gap-5" style={{ gridTemplateColumns: "1.15fr 1fr 0.95fr" }}>
 
-        {/* ════════════════ COL 1: MEALS ════════════════ */}
+        {/* ════════════════ COL 1: MEALS + PLANTS ════════════════ */}
         <ErrorBoundary label="Meals">
-        <div className="flex flex-col border-r border-border overflow-hidden">
+          <div className="flex flex-col gap-5 min-h-0">
+            <DinnerHero dinner={dinnerToday} />
 
-          {/* Today */}
-          <div className="flex-1 flex flex-col overflow-hidden border-b border-border">
-            <SectionHeading>Today</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-3">
-              <MealSection dinner={dinnerToday} lunchboxes={lunchboxesToday} memberMap={memberMap} />
-            </div>
+            <Card className="px-7 py-5">
+              <Kicker>Lunchboxes today</Kicker>
+              <Lunchboxes lunchboxes={lunchboxesToday} memberMap={memberMap} large />
+            </Card>
+
+            <Card className="px-7 py-5">
+              <Kicker>Tomorrow</Kicker>
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div className="min-w-0">
+                  <p className="text-[14px] text-muted-foreground">Dinner</p>
+                  <p className={cn("text-[19px] font-semibold truncate", !dinnerTomorrow && "text-muted-foreground font-medium")}>
+                    {dinnerTomorrow?.title ?? "Not planned"}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[14px] text-muted-foreground">Lunchboxes</p>
+                  <Lunchboxes lunchboxes={lunchboxesTomorrow} memberMap={memberMap} />
+                </div>
+              </div>
+            </Card>
+
+            <PlantsCard
+              memberPlantCounts={memberPlantCounts}
+              familyCount={familyCount}
+              familyMax={familyMax}
+              familyGoal={familyGoal}
+              growingPlantCount={growingPlantCount}
+              pendingCount={familyPendingCount}
+            />
           </div>
-
-          {/* Tomorrow */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <SectionHeading>Tomorrow</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-3">
-              <MealSection dinner={dinnerTomorrow} lunchboxes={lunchboxesTomorrow} memberMap={memberMap} />
-            </div>
-          </div>
-
-        </div>
         </ErrorBoundary>
 
         {/* ════════════════ COL 2: TASKS ════════════════ */}
         <ErrorBoundary label="Tasks">
-        <div className="flex flex-col border-r border-border overflow-hidden">
+          <Card className="flex flex-col min-h-0 p-7 gap-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="font-display text-[28px] font-semibold">Today&apos;s jobs</h2>
+              {choresToday.length > 0 && (
+                <p className="text-[15px] font-semibold text-muted-foreground tabular-nums">
+                  {doneToday} of {choresToday.length} done
+                </p>
+              )}
+            </div>
 
-          {/* Today's tasks */}
-          <div className="flex-1 flex flex-col overflow-hidden border-b border-border">
-            <SectionHeading>Today&apos;s Tasks</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-3">
-              <TasksList
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <TasksToday
                 chores={choresToday}
                 memberMap={memberMap}
                 choreStreaks={choreStreaks}
-                interactive
                 onToggle={toggleChore}
               />
             </div>
-          </div>
 
-          {/* Tomorrow's tasks + messages bar */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <SectionHeading>Tomorrow&apos;s Tasks</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-3">
-              <TasksList
-                chores={choresTomorrow}
-                memberMap={memberMap}
-                interactive={false}
-              />
-            </div>
+            {choresTomorrow.length > 0 && (
+              <div className="shrink-0 border-t border-border pt-4">
+                <Kicker>Tomorrow</Kicker>
+                <TasksTomorrow chores={choresTomorrow} memberMap={memberMap} />
+              </div>
+            )}
+
             {msgMemberNames.length > 0 && (
-              <div className="shrink-0 border-t border-border bg-primary/5 px-4 py-2">
-                <p className="text-[13px] text-muted-foreground leading-snug">
-                  <span className="mr-1">💬</span>
-                  <span className="font-semibold text-foreground">{msgMemberNames.join(", ")}</span>
-                  {" "}{msgMemberNames.length === 1 ? "has" : "have"} messages
+              <div className="shrink-0 flex items-center gap-3 rounded-2xl bg-accent text-accent-foreground px-4 py-3">
+                <MessageSquare className="size-5 shrink-0" />
+                <p className="text-[15px] leading-snug">
+                  <span className="font-semibold">{msgMemberNames.join(", ")}</span>
+                  {" "}{msgMemberNames.length === 1 ? "has" : "have"} new messages
                 </p>
               </div>
             )}
-          </div>
-
-        </div>
+          </Card>
         </ErrorBoundary>
 
-        {/* ════════════════ COL 3: CALENDAR + PLANTS ════════════════ */}
-        <ErrorBoundary label="Calendar & Plants">
-        <div className="flex flex-col overflow-hidden">
-
-          {/* Calendar — 60% */}
-          <div className="flex flex-col overflow-hidden border-b border-border" style={{ flex: "3" }}>
-            <SectionHeading>This Week</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-3">
-              <CalendarSection
-                events={events}
-                upcomingBirthdays={upcomingBirthdays}
-                todayStr={todayStr}
-              />
+        {/* ════════════════ COL 3: THIS WEEK ════════════════ */}
+        <ErrorBoundary label="Calendar">
+          <Card className="flex flex-col min-h-0 p-7 gap-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-display text-[28px] font-semibold">This week</h2>
+              <span className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+                <RefreshCw className="size-3.5" />
+                Google Calendar
+              </span>
             </div>
-          </div>
-
-          {/* Plants — 40% */}
-          <div className="flex flex-col overflow-hidden" style={{ flex: "2" }}>
-            <SectionHeading>🌿 Plants</SectionHeading>
-            <div className="flex-1 overflow-hidden px-4 py-2">
-              <PlantsSection
-                members={members}
-                confirmedWallPlants={confirmedWallPlants}
-                familyCount={familyCount}
-                familyMax={familyMax}
-                familyGoal={familyGoal}
-                growingPlantCount={growingPlantCount}
-                pendingCount={familyPendingCount}
-              />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <CalendarSection events={events} upcomingBirthdays={upcomingBirthdays} todayStr={todayStr} />
             </div>
-          </div>
-
-        </div>
+          </Card>
         </ErrorBoundary>
 
       </div>
@@ -444,129 +441,121 @@ export default function WallPage() {
   )
 }
 
-// ── SectionHeading ─────────────────────────────────────────────────────────────
+// ── Building blocks ────────────────────────────────────────────────────────────
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
+function Card({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className="shrink-0 px-4 py-2 bg-muted/25 border-b border-border">
-      <h2 className="text-[13px] font-bold uppercase tracking-widest text-muted-foreground leading-none">
-        {children}
-      </h2>
-    </div>
+    <section className={cn("rounded-[28px] bg-card border border-border", className)}>
+      {children}
+    </section>
   )
 }
 
-// ── MealSection ────────────────────────────────────────────────────────────────
+function Kicker({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={cn("text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}>
+      {children}
+    </p>
+  )
+}
 
-function MealSection({
-  dinner, lunchboxes, memberMap,
+/** Coloured circle per family member: their emoji if set, otherwise their initial. */
+function Avatar({ member, className }: { member: Member | null | undefined; className?: string }) {
+  const color = member?.color ?? "#8C8279"
+  const emoji = member?.avatar_emoji
+  return (
+    <span
+      title={member?.name}
+      className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none", className)}
+      style={emoji
+        ? { backgroundColor: `${color}2E`, boxShadow: `inset 0 0 0 2px ${color}` }
+        : { backgroundColor: color, color: "#FFFFFF" }}
+    >
+      {emoji ?? (member?.name?.[0]?.toUpperCase() ?? "?")}
+    </span>
+  )
+}
+
+// ── Meals ──────────────────────────────────────────────────────────────────────
+
+function DinnerHero({ dinner }: { dinner: Meal | null }) {
+  return (
+    <section className="rounded-[28px] bg-primary text-primary-foreground px-7 py-6 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[13px] font-semibold uppercase tracking-[0.08em] opacity-80">Tonight&apos;s dinner</p>
+        <Soup className="size-6 opacity-80" />
+      </div>
+      {dinner ? (
+        <>
+          <h2 className="font-display text-[38px] font-semibold leading-[1.05] tracking-tight line-clamp-2">
+            {dinner.title}
+          </h2>
+          {dinner.notes && (
+            <span className="self-start rounded-full bg-white/15 px-3 py-1.5 text-[14px] font-medium truncate max-w-full">
+              {dinner.notes}
+            </span>
+          )}
+        </>
+      ) : (
+        <h2 className="font-display text-[30px] font-semibold leading-tight opacity-80">Nothing planned yet</h2>
+      )}
+    </section>
+  )
+}
+
+function Lunchboxes({
+  lunchboxes, memberMap, large = false,
 }: {
-  dinner: Meal | null
   lunchboxes: Meal[]
   memberMap: Map<string, Member>
+  large?: boolean
 }) {
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Dinner */}
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">
-          🍽️ Dinner
-        </p>
-        {dinner ? (
-          <>
-            <p className="text-[20px] font-bold leading-tight truncate">{dinner.title}</p>
-            {dinner.notes && (
-              <p className="text-[13px] text-muted-foreground truncate mt-0.5">{dinner.notes}</p>
-            )}
-          </>
-        ) : (
-          <p className="text-[15px] text-muted-foreground italic">Nothing planned</p>
-        )}
-      </div>
-
-      {/* Lunchboxes */}
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5">
-          🥪 Lunchboxes
-        </p>
-        {lunchboxes.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {lunchboxes.map(lunch => {
-              const child = lunch.for_member_id ? memberMap.get(lunch.for_member_id) : null
-              return (
-                <div key={lunch.id} className="flex items-center gap-2">
-                  {child?.avatar_emoji && (
-                    <span className="text-[18px] leading-none shrink-0">{child.avatar_emoji}</span>
-                  )}
-                  <div className="min-w-0">
-                    {child && (
-                      <p className="text-[11px] font-bold uppercase tracking-wide truncate"
-                        style={{ color: child.color ?? undefined }}>
-                        {child.name}
-                      </p>
-                    )}
-                    <p className="text-[15px] font-semibold leading-snug truncate">{lunch.title}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="text-[15px] text-muted-foreground italic">Nothing planned</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── TasksList ──────────────────────────────────────────────────────────────────
-
-const MAX_TASKS = 6
-
-function TasksList({
-  chores, memberMap, choreStreaks, interactive = false, onToggle,
-}: {
-  chores: Chore[]
-  memberMap: Map<string, Member>
-  choreStreaks?: Map<string, WallChoreStreak>
-  interactive?: boolean
-  onToggle?: (c: Chore) => void
-}) {
-  if (chores.length === 0) {
+  if (lunchboxes.length === 0) {
     return (
-      <p className="text-[15px] text-muted-foreground italic">
-        {interactive ? "No tasks today 🎉" : "Nothing due tomorrow"}
+      <p className={cn("text-muted-foreground font-medium", large ? "text-[19px] mt-1.5" : "text-[19px]")}>
+        Not planned
       </p>
     )
   }
+  return (
+    <div className={cn("flex flex-col", large ? "gap-2.5 mt-2.5" : "gap-1")}>
+      {lunchboxes.map(lunch => {
+        const child = lunch.for_member_id ? memberMap.get(lunch.for_member_id) : null
+        return (
+          <div key={lunch.id} className="flex items-center gap-2.5 min-w-0">
+            {child && <Avatar member={child} className={large ? "size-8 text-[15px]" : "size-6 text-[12px]"} />}
+            <p className={cn("font-semibold truncate", large ? "text-[21px]" : "text-[16px]")}>{lunch.title}</p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
-  const total    = chores.length
-  const overflow = total > MAX_TASKS ? total - (MAX_TASKS - 1) : 0
-  const shown    = overflow > 0 ? chores.slice(0, MAX_TASKS - 1) : chores
+// ── Tasks ──────────────────────────────────────────────────────────────────────
 
-  if (!interactive) {
-    // Flat list: avatar + task name only
+const MAX_TASKS = 8
+
+function TasksToday({
+  chores, memberMap, choreStreaks, onToggle,
+}: {
+  chores: Chore[]
+  memberMap: Map<string, Member>
+  choreStreaks: Map<string, WallChoreStreak>
+  onToggle: (c: Chore) => void
+}) {
+  if (chores.length === 0) {
     return (
-      <div className="flex flex-col gap-1.5">
-        {shown.map(chore => {
-          const member = chore.assigned_to ? memberMap.get(chore.assigned_to) : null
-          return (
-            <div key={chore.id} className="flex items-center gap-2">
-              {member?.avatar_emoji && (
-                <span className="text-[16px] leading-none shrink-0">{member.avatar_emoji}</span>
-              )}
-              <span className="text-[15px] leading-snug truncate flex-1">{chore.title}</span>
-            </div>
-          )
-        })}
-        {overflow > 0 && (
-          <p className="text-[13px] text-muted-foreground italic">+{overflow} more</p>
-        )}
+      <div className="h-full flex flex-col items-center justify-center gap-2 rounded-2xl bg-accent/60 text-accent-foreground">
+        <CheckCircle2 className="size-8" />
+        <p className="text-[18px] font-semibold">No jobs today</p>
       </div>
     )
   }
 
-  // Grouped interactive view
+  const overflow = chores.length > MAX_TASKS ? chores.length - (MAX_TASKS - 1) : 0
+  const shown    = overflow > 0 ? chores.slice(0, MAX_TASKS - 1) : chores
+
   const groupMap = new Map<string, Chore[]>()
   for (const c of shown) {
     const key = c.assigned_to ?? "__none__"
@@ -575,81 +564,99 @@ function TasksList({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
       {Array.from(groupMap.entries()).map(([key, items]) => {
         const member = key === "__none__" ? null : (memberMap.get(key) ?? null)
-        const streak = member ? choreStreaks?.get(member.id) : null
+        const streak = member ? choreStreaks.get(member.id) : null
+        const earned = items.filter(c => c.completed).reduce((s, c) => s + (c.pocket_money_value ?? 0), 0)
         return (
-          <div key={key}>
-            {/* Member sub-heading */}
-            <div className="flex items-center gap-1.5 mb-1">
-              {member?.avatar_emoji && (
-                <span className="text-[18px] leading-none">{member.avatar_emoji}</span>
+          <div key={key} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2.5">
+              <Avatar member={member} className="size-8 text-[15px]" />
+              <span className="text-[17px] font-semibold">{member?.name ?? "Anyone"}</span>
+              {streak && streak.streak_count > 1 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[13px] font-semibold tabular-nums">
+                  <Flame className="size-3.5 text-[#C2552F]" />
+                  {streak.streak_count}
+                </span>
               )}
-              <span
-                className="text-[15px] font-bold leading-none"
-                style={member?.color ? { color: member.color } : undefined}
-              >
-                {member?.name ?? "Unassigned"}
-              </span>
-              {streak && streak.streak_count > 0 && (
-                <span className={cn(
-                  "text-[13px] font-bold tabular-nums",
-                  streak.streak_count >= 7 ? "text-orange-500" : "text-amber-500",
-                )}>
-                  🔥{streak.streak_count}
+              {earned > 0 && (
+                <span className="ml-auto rounded-full bg-[#FBEBD9] dark:bg-[#3A2A1A] px-2.5 py-1 text-[13px] font-semibold text-[#8A4B12] dark:text-[#F0C08A] tabular-nums">
+                  S${earned.toFixed(2)} earned
                 </span>
               )}
             </div>
 
-            {/* Task rows */}
-            <div className="flex flex-col gap-1 pl-1">
-              {items.map(chore => (
-                <button
-                  key={chore.id}
-                  onClick={() => onToggle?.(chore)}
-                  className="flex items-center gap-2 w-full text-left group cursor-pointer"
-                >
-                  {chore.completed ? (
-                    <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
-                  ) : (
-                    <Circle className="h-5 w-5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
-                  )}
-                  <span className={cn(
-                    "text-[15px] leading-snug flex-1 truncate",
-                    chore.completed && "line-through text-muted-foreground",
-                  )}>
-                    {chore.title}
+            {items.map(chore => (
+              <button
+                key={chore.id}
+                onClick={() => onToggle(chore)}
+                aria-pressed={chore.completed}
+                className={cn(
+                  "flex items-center gap-3.5 w-full min-h-[54px] px-3.5 rounded-2xl border text-left transition-colors active:scale-[0.99]",
+                  chore.completed
+                    ? "bg-accent/70 border-accent"
+                    : "bg-background/40 border-border hover:bg-secondary/60",
+                )}
+              >
+                <span className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                  chore.completed ? "bg-primary border-primary text-primary-foreground" : "border-input",
+                )}>
+                  {chore.completed && <Check className="size-4" strokeWidth={3} />}
+                </span>
+                <span className={cn(
+                  "flex-1 truncate text-[17px] font-medium",
+                  chore.completed && "line-through text-muted-foreground",
+                )}>
+                  {chore.title}
+                </span>
+                {chore.pocket_money_value > 0 && (
+                  <span className="shrink-0 text-[14px] font-semibold text-[#8A4B12] dark:text-[#F0C08A] tabular-nums">
+                    S${chore.pocket_money_value.toFixed(2)}
                   </span>
-                  {chore.pocket_money_value > 0 && (
-                    <span className="text-[13px] text-muted-foreground shrink-0 tabular-nums">
-                      S${chore.pocket_money_value.toFixed(2)}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
+                )}
+              </button>
+            ))}
           </div>
         )
       })}
-      {overflow > 0 && (
-        <p className="text-[13px] text-muted-foreground italic">+{overflow} more</p>
-      )}
+      {overflow > 0 && <p className="text-[14px] font-medium text-muted-foreground">+{overflow} more</p>}
     </div>
   )
 }
 
-// ── CalendarSection ────────────────────────────────────────────────────────────
+function TasksTomorrow({ chores, memberMap }: { chores: Chore[]; memberMap: Map<string, Member> }) {
+  const shown = chores.slice(0, 4)
+  const more  = chores.length - shown.length
+  return (
+    <div className="flex flex-wrap gap-2 mt-2.5">
+      {shown.map(chore => {
+        const member = chore.assigned_to ? memberMap.get(chore.assigned_to) : null
+        return (
+          <span key={chore.id} className="inline-flex items-center gap-2 rounded-full bg-secondary pl-1 pr-3 py-1 max-w-full">
+            <Avatar member={member} className="size-6 text-[12px]" />
+            <span className="text-[14px] font-medium truncate">{chore.title}</span>
+          </span>
+        )
+      })}
+      {more > 0 && <span className="text-[14px] font-medium text-muted-foreground self-center">+{more} more</span>}
+    </div>
+  )
+}
 
-const MAX_EVENTS = 8
+// ── Calendar ───────────────────────────────────────────────────────────────────
+
+const MAX_EVENTS = 7
 
 interface CalItem {
   id: string
   title: string
-  chip: string
+  date: Date
   time: string | null
   color: string
   isToday: boolean
+  isBirthday: boolean
   sortMs: number
 }
 
@@ -664,16 +671,16 @@ function CalendarSection({
 
   for (const ev of events) {
     const d = new Date(ev.start_at)
-    const isToday = toDateStr(d) === todayStr
     items.push({
       id: ev.id,
       title: ev.title,
-      chip: dayChip(d, todayStr),
-      time: ev.is_all_day ? null : ev.end_at
-        ? `${fmtTime(ev.start_at)} – ${fmtTime(ev.end_at)}`
+      date: d,
+      time: ev.is_all_day ? "All day" : ev.end_at
+        ? `${fmtTime(ev.start_at)} to ${fmtTime(ev.end_at)}`
         : fmtTime(ev.start_at),
-      color: ev.color ?? "#3b82f6",
-      isToday,
+      color: ev.color ?? "#3D6B57",
+      isToday: toDateStr(d) === todayStr,
+      isBirthday: false,
       sortMs: d.getTime(),
     })
   }
@@ -681,11 +688,12 @@ function CalendarSection({
   for (const b of upcomingBirthdays) {
     items.push({
       id: `bd-${b.id}`,
-      title: `${b.type === "birthday" ? "🎂" : "❤️"} ${b.name}`,
-      chip: dayChip(b.occ, todayStr),
-      time: null,
-      color: b.color || "#ec4899",
+      title: b.name,
+      date: b.occ,
+      time: b.type === "birthday" ? "Birthday" : "Anniversary",
+      color: b.color || "#A3456B",
       isToday: b.daysAway === 0,
+      isBirthday: true,
       sortMs: b.occ.getTime(),
     })
   }
@@ -694,110 +702,95 @@ function CalendarSection({
 
   if (items.length === 0) {
     return (
-      <p className="text-[15px] text-muted-foreground italic">Nothing in the calendar this week</p>
+      <div className="h-full flex flex-col items-center justify-center gap-2 rounded-2xl bg-secondary/60 text-muted-foreground">
+        <CalendarDays className="size-8" />
+        <p className="text-[17px] font-medium">A quiet week</p>
+      </div>
     )
   }
 
-  const total    = items.length
-  const overflow = total > MAX_EVENTS ? total - MAX_EVENTS : 0
+  const overflow = items.length > MAX_EVENTS ? items.length - MAX_EVENTS : 0
   const shown    = overflow > 0 ? items.slice(0, MAX_EVENTS) : items
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3.5">
       {shown.map(item => (
-        <div
-          key={item.id}
-          className={cn(
-            "flex items-start gap-2",
-            item.isToday && "opacity-100",
-            !item.isToday && "opacity-80",
-          )}
-        >
-          {/* Date chip */}
-          <span
-            className="shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-bold leading-none mt-0.5 whitespace-nowrap"
-            style={{
-              backgroundColor: `${item.color}22`,
-              color: item.color,
-            }}
-          >
-            {item.chip}
-          </span>
-
-          {/* Title + time */}
-          <div className="min-w-0 flex-1">
-            <p className={cn(
-              "text-[15px] leading-snug truncate",
-              item.isToday ? "font-bold" : "font-medium",
-            )}>
-              {item.title}
+        <div key={item.id} className="flex items-stretch gap-3.5">
+          <div className={cn(
+            "flex w-[54px] shrink-0 flex-col items-center justify-center rounded-2xl py-2",
+            item.isToday ? "bg-foreground text-background" : "bg-secondary text-foreground",
+          )}>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.06em]">
+              {item.date.toLocaleDateString("en-GB", { weekday: "short" })}
+            </span>
+            <span className="font-display text-[22px] font-semibold leading-tight">{item.date.getDate()}</span>
+          </div>
+          <div className="min-w-0 flex-1 flex flex-col justify-center gap-1">
+            <p className="flex items-center gap-1.5 text-[17px] font-semibold leading-snug">
+              {item.isBirthday && <Cake className="size-4 shrink-0" style={{ color: item.color }} />}
+              <span className="truncate">{item.title}</span>
             </p>
-            {item.time && (
-              <p className="text-[13px] text-muted-foreground">{item.time}</p>
-            )}
+            <p className="flex items-center gap-2 text-[14px] text-muted-foreground">
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+              {item.time}
+            </p>
           </div>
         </div>
       ))}
-      {overflow > 0 && (
-        <p className="text-[13px] text-muted-foreground italic">+{overflow} more</p>
-      )}
+      {overflow > 0 && <p className="text-[14px] font-medium text-muted-foreground">+{overflow} more this week</p>}
     </div>
   )
 }
 
-// ── PlantsSection ──────────────────────────────────────────────────────────────
+// ── Plants ─────────────────────────────────────────────────────────────────────
 
-function PlantsSection({
-  members, confirmedWallPlants, familyCount, familyMax, familyGoal, growingPlantCount, pendingCount,
+function PlantsCard({
+  memberPlantCounts, familyCount, familyMax, familyGoal, growingPlantCount, pendingCount,
 }: {
-  members: Member[]
-  confirmedWallPlants: WallMemberPlant[]
+  memberPlantCounts: Array<{ member: Member; count: number }>
   familyCount: number
   familyMax: number
   familyGoal: boolean
   growingPlantCount: number
   pendingCount: number
 }) {
+  const pct = familyMax > 0 ? Math.min(100, Math.round((familyCount / familyMax) * 100)) : 0
   return (
-    <div className="h-full flex flex-col items-center justify-between gap-2">
-      {/* Growing plant */}
-      <div className="shrink-0">
-        <GrowingPlant count={growingPlantCount} size="sm" />
-      </div>
-
-      {/* Family total */}
-      <div className="shrink-0 text-center">
-        <p className={cn(
-          "text-[20px] font-black tabular-nums leading-none",
-          familyGoal ? "text-green-500" : "text-foreground",
-        )}>
-          🌳 {familyCount}
-          <span className="text-[14px] font-semibold text-muted-foreground"> / {familyMax}</span>
-        </p>
-        {pendingCount > 0 && (
-          <p className="text-[11px] text-muted-foreground mt-0.5">(+{pendingCount} pending)</p>
-        )}
-      </div>
-
-      {/* Per-member compact row — confirmed counts only */}
-      {members.length > 0 && (
-        <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 shrink-0">
-          {members.map(m => {
-            const count = new Set(
-              confirmedWallPlants.filter(wp => wp.member_id === m.id).map(wp => wp.plant_id)
-            ).size
-            const goal = count >= 30
+    <section className="flex-1 min-h-0 rounded-[28px] bg-accent text-accent-foreground px-7 py-5 flex gap-4 overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <Kicker className="text-accent-foreground/80">Plants this week</Kicker>
+          <p className="text-[15px] font-semibold tabular-nums">
+            {familyCount} of {familyMax}
+            {pendingCount > 0 && <span className="font-medium opacity-70"> (+{pendingCount} today)</span>}
+          </p>
+        </div>
+        <div className="h-3 rounded-full bg-primary/15 overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all", familyGoal ? "bg-[#3D8B5F]" : "bg-primary")}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(1, memberPlantCounts.length)}, minmax(0, 1fr))` }}>
+          {memberPlantCounts.map(({ member, count }) => {
+            const color = member.color ?? "#3D6B57"
             return (
-              <span key={m.id} className="text-[15px] font-semibold tabular-nums">
-                {m.avatar_emoji ?? "👤"}{" "}
-                <span className={goal ? "text-green-500" : "text-foreground"}>
-                  {count}{goal ? "✨" : ""}
-                </span>
-              </span>
+              <div key={member.id} className="flex flex-col gap-1.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Avatar member={member} className="size-7 text-[13px]" />
+                  <span className="text-[20px] font-semibold tabular-nums text-foreground">{count}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-primary/15 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, (count / 30) * 100)}%`, backgroundColor: color }} />
+                </div>
+              </div>
             )
           })}
         </div>
-      )}
-    </div>
+      </div>
+      <div className="shrink-0 self-center">
+        <GrowingPlant count={growingPlantCount} size="sm" />
+      </div>
+    </section>
   )
 }
