@@ -374,9 +374,9 @@ export default function SettingsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-10">
+    <div className="max-w-2xl px-4 lg:px-8 py-6 lg:py-7 space-y-10 pb-28 lg:pb-10">
 
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight">Settings</h1>
 
       {/* ── Family name ──────────────────────────────────────────────────── */}
       <section className="space-y-4">
@@ -703,7 +703,7 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
   return (
     <div className="flex items-center gap-2 pb-2 border-b">
       <span className="text-muted-foreground">{icon}</span>
-      <h2 className="text-base font-semibold">{title}</h2>
+      <h2 className="font-display text-[19px] font-semibold">{title}</h2>
     </div>
   )
 }

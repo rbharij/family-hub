@@ -135,12 +135,12 @@ export default function MessagesPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full p-3 lg:p-4 gap-3">
+    <div className="flex flex-col h-full p-4 lg:px-8 lg:py-7 gap-4 lg:gap-5">
       {/* Header */}
       <div className="flex items-center gap-3 shrink-0">
-        <h1 className="text-xl font-bold flex-1">Messages</h1>
-        <Button size="sm" className="gap-1.5" onClick={() => setComposeOpen(true)}>
-          <Send className="h-3.5 w-3.5" />
+        <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight flex-1">Messages</h1>
+        <Button className="h-11 px-4 rounded-xl gap-2" onClick={() => setComposeOpen(true)}>
+          <Send className="size-4" />
           Compose
         </Button>
       </div>

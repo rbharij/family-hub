@@ -394,36 +394,39 @@ export default function PlantsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div ref={pageRef} className="flex flex-col p-3 lg:p-5 gap-6 max-w-5xl mx-auto w-full pb-24">
+    <div ref={pageRef} className="flex flex-col p-4 lg:px-8 lg:py-7 gap-5 lg:gap-6 w-full pb-28 lg:pb-10">
 
-      {/* ── Week navigation ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap">
-        <Button variant="outline" size="icon" className="h-8 w-8"
-          onClick={() => setWeekStart(w => addWeeks(w, -1))}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="icon" className="h-8 w-8"
-          onClick={() => setWeekStart(w => addWeeks(w, 1))}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold truncate">{weekLabel(weekStart)}</h2>
+      {/* ── Header + week navigation ─────────────────────────────────────── */}
+      <div className="flex items-center gap-2 lg:gap-3 shrink-0 flex-wrap">
+        <div className="mr-1 lg:mr-2 min-w-0">
+          <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight">Plants</h1>
+          <p className="text-[14px] lg:text-[15px] text-muted-foreground truncate">30 different plants each · {weekLabel(weekStart)}</p>
         </div>
-        {!isCurrentWeek && (
-          <Button variant="outline" size="sm" className="h-8"
-            onClick={() => setWeekStart(todayWeekStart)}>
-            This week
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" aria-label="Previous week"
+            onClick={() => setWeekStart(w => addWeeks(w, -1))}>
+            <ChevronLeft className="size-5" />
           </Button>
-        )}
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" aria-label="Next week"
+            onClick={() => setWeekStart(w => addWeeks(w, 1))}>
+            <ChevronRight className="size-5" />
+          </Button>
+          {!isCurrentWeek && (
+            <Button variant="outline" className="h-11 px-4 rounded-xl bg-card"
+              onClick={() => setWeekStart(todayWeekStart)}>
+              This week
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* ── Summary: family plant + member progress cards ──────────────── */}
       <div className="flex flex-col sm:flex-row gap-4">
 
         {/* Family plant card */}
-        <div className="rounded-2xl border-2 bg-card p-5 flex flex-col items-center gap-3 shrink-0
-          sm:w-[200px]"
-          style={{ borderColor: familyGoal ? "#22c55e" : undefined }}
+        <div className="rounded-[28px] border border-transparent bg-accent text-accent-foreground p-5 flex flex-col items-center gap-3 shrink-0
+          sm:w-[220px]"
+          style={{ borderColor: familyGoal ? "#3D8B5F" : undefined }}
         >
           <GrowingPlant count={familyGoal ? 30 : Math.floor((familyPct / 100) * 30)} size="lg" />
 
@@ -480,10 +483,10 @@ export default function PlantsPage() {
                     key={m.id}
                     onClick={() => scrollToMember(m.id)}
                     className={cn(
-                      "flex flex-col items-center gap-2 rounded-2xl border-2 bg-card px-4 py-4 shrink-0",
-                      "hover:bg-muted/30 active:scale-95 transition-all cursor-pointer",
-                      "w-[120px] sm:w-[130px]",
-                      goal ? "border-green-400 dark:border-green-600" : "border-border",
+                      "flex flex-col items-center gap-2 rounded-[24px] border bg-card px-4 py-4 shrink-0",
+                      "hover:border-primary/40 active:scale-95 transition-all cursor-pointer",
+                      "w-[124px] sm:w-[136px]",
+                      goal ? "border-[#3D8B5F]" : "border-border",
                     )}
                   >
                     {/* Ring with avatar in centre */}
@@ -537,11 +540,11 @@ export default function PlantsPage() {
           <section
             key={m.id}
             id={`member-section-${m.id}`}
-            className="rounded-2xl border-2 bg-card overflow-hidden"
-            style={{ borderColor: goal ? "#22c55e" : undefined }}
+            className="rounded-[28px] border border-border bg-card overflow-hidden"
+            style={{ borderColor: goal ? "#3D8B5F" : undefined }}
           >
             {/* Section header */}
-            <div className="flex items-center gap-3 px-5 py-4 border-b bg-muted/20">
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-border/70">
               <span
                 className="text-3xl leading-none p-2 rounded-full shrink-0"
                 style={{ backgroundColor: `${color}22` }}
@@ -550,7 +553,7 @@ export default function PlantsPage() {
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-lg font-bold" style={{ color }}>{m.name}</h3>
+                  <h3 className="font-display text-[20px] font-semibold">{m.name}</h3>
                   {goal && <span className="text-xs font-bold text-green-500">🎉 Goal reached!</span>}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
@@ -873,16 +876,16 @@ function GardenEncyclopedia({ library, members, discoveries, loading }: {
   const filtered = catFilter ? sorted.filter(p => p.category === catFilter) : sorted
 
   if (loading) return (
-    <section className="rounded-2xl border-2 border-border bg-card p-5 space-y-3">
+    <section className="rounded-[28px] border border-border bg-card p-5 space-y-3">
       <Skeleton className="h-6 w-40 rounded" />
       {[1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
     </section>
   )
 
   return (
-    <section className="rounded-2xl border-2 border-border bg-card overflow-hidden" id="garden-encyclopedia">
-      <div className="px-5 py-4 border-b bg-muted/20">
-        <h2 className="text-base font-bold">🌿 Our Garden</h2>
+    <section className="rounded-[28px] border border-border bg-card overflow-hidden" id="garden-encyclopedia">
+      <div className="px-5 py-4 border-b border-border/70">
+        <h2 className="font-display text-[22px] font-semibold">Our garden</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
           Every plant the family has ever tried — {discovered.length} discovered
         </p>
@@ -920,11 +923,11 @@ function GardenEncyclopedia({ library, members, discoveries, loading }: {
             ))}
           </div>
 
-          <div className="space-y-2">
+          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
             {filtered.map(plant => {
               const plantDiscs = discoveries.filter(d => d.plant_id === plant.id)
               return (
-                <div key={plant.id} className="rounded-xl border bg-background px-4 py-3 space-y-2">
+                <div key={plant.id} className="rounded-2xl border border-border bg-background/60 px-4 py-3 space-y-2">
                   <div className="flex items-center gap-3">
                     <span className="text-2xl leading-none shrink-0">{plant.emoji ?? "🌿"}</span>
                     <div className="flex-1 min-w-0">

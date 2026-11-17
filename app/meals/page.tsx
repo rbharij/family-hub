@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Copy } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, Plus } from "lucide-react"
+import { MemberAvatar } from "@/components/member-avatar"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -13,7 +14,7 @@ import { useRealtimeChannel } from "@/lib/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
 import {
   startOfWeek, addDays, toDateStr, weekDays,
-  DAY_LABELS, DAY_FULL, MEAL_EMOJIS,
+  DAY_LABELS, DAY_FULL,
   type Meal, type MealType, type FamilyMember,
 } from "./_utils"
 import { MealEditor } from "./_meal-editor"
@@ -234,46 +235,44 @@ export default function MealsPage() {
   const weekEnd   = addDays(weekStart, 6)
   const weekLabel = (() => {
     const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" }
-    return `${weekStart.toLocaleDateString("en-AU", opts)} – ${weekEnd.toLocaleDateString("en-AU", opts)} ${weekEnd.getFullYear()}`
+    return `${weekStart.toLocaleDateString("en-GB", opts)} to ${weekEnd.toLocaleDateString("en-GB", opts)}`
   })()
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
+    <div className="flex flex-col lg:h-full p-4 lg:px-8 lg:py-7 gap-4 lg:gap-5">
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap">
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={prevWeek}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={nextWeek}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <h2 className="text-base font-semibold shrink-0">{weekLabel}</h2>
-        {!isThisWeek && (
-          <Button variant="outline" size="sm" className="h-8" onClick={goThisWeek}>
-            This week
+      <div className="flex items-center gap-2 lg:gap-3 shrink-0 flex-wrap">
+        <div className="mr-1 lg:mr-2">
+          <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight">Meals</h1>
+          <p className="text-[14px] lg:text-[15px] text-muted-foreground">{weekLabel}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={prevWeek} aria-label="Previous week">
+            <ChevronLeft className="size-5" />
           </Button>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5"
-          onClick={() => setCopyDialogOpen(true)}
-        >
-          <Copy className="h-3.5 w-3.5" />
-          Copy last week
-        </Button>
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={nextWeek} aria-label="Next week">
+            <ChevronRight className="size-5" />
+          </Button>
+          {!isThisWeek && (
+            <Button variant="outline" className="h-11 px-4 rounded-xl bg-card" onClick={goThisWeek}>This week</Button>
+          )}
+        </div>
 
         <div className="ml-auto flex items-center gap-3">
-          <SummaryPill emoji="🍽️" count={dinnersPlanned} total={7} label="dinners" loading={loading} />
+          <SummaryPill count={dinnersPlanned} total={7} label="dinners planned" loading={loading} />
+          <Button variant="outline" className="h-11 px-4 rounded-xl bg-card gap-2" onClick={() => setCopyDialogOpen(true)}>
+            <Copy className="size-4" />
+            <span className="hidden sm:inline">Copy last week</span>
+          </Button>
         </div>
       </div>
 
       {/* ── Desktop: 7-column grid ──────────────────────────────────────── */}
       <ErrorBoundary label="Meal grid">
-        <div className="hidden lg:grid lg:grid-cols-7 flex-1 min-h-0 gap-2 overflow-hidden relative">
+        <div className="hidden lg:grid lg:grid-cols-7 flex-1 min-h-0 gap-2.5 overflow-hidden relative">
           {loading && (
             <div className="absolute inset-0 z-10 grid grid-cols-7 gap-2 pointer-events-none">
               {Array.from({ length: 7 }).map((_, i) => (
@@ -316,16 +315,16 @@ export default function MealsPage() {
                   key={di}
                   onClick={() => setMobileDay(di)}
                   className={cn(
-                    "flex flex-col items-center rounded-xl px-3 py-2 min-w-[44px] min-h-[44px] shrink-0 transition-colors",
+                    "flex flex-col items-center rounded-2xl px-3 py-2 min-w-[46px] min-h-[44px] shrink-0 transition-colors",
                     mobileDay === di
                       ? "bg-primary text-primary-foreground"
                       : isToday
-                      ? "bg-primary/10 text-primary"
-                      : "hover:bg-muted",
+                      ? "bg-foreground text-background"
+                      : "bg-card border border-border",
                   )}
                 >
                   <span className="text-sm font-medium">{DAY_LABELS[di]}</span>
-                  <span className="text-xl font-bold leading-tight">{day.getDate()}</span>
+                  <span className="font-display text-xl font-semibold leading-tight">{day.getDate()}</span>
                   <div className="flex gap-0.5 mt-0.5 h-1">
                     {Array.from({ length: dotCount }).map((_, i) => (
                       <span
@@ -405,16 +404,17 @@ export default function MealsPage() {
 
 // ── Summary pill ───────────────────────────────────────────────────────────────
 
-function SummaryPill({ emoji, count, total, label, loading }: {
-  emoji: string; count: number; total: number; label: string; loading: boolean
+function SummaryPill({ count, total, label, loading }: {
+  count: number; total: number; label: string; loading: boolean
 }) {
+  if (loading) return <Skeleton className="h-9 w-40 rounded-full" />
+  const pct = Math.round((count / total) * 100)
   return (
-    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-      <span>{emoji}</span>
-      {loading
-        ? <Skeleton className="h-4 w-20 rounded" />
-        : <span><strong className="text-foreground">{count}</strong>/{total} {label}</span>
-      }
+    <div className="hidden sm:flex flex-col items-end gap-1.5">
+      <span className="text-sm font-semibold text-foreground/80 tabular-nums">{count} of {total} {label}</span>
+      <span className="h-2 w-40 rounded-full bg-secondary overflow-hidden">
+        <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </span>
     </div>
   )
 }
@@ -438,123 +438,116 @@ function DayColumn({
 }) {
   return (
     <div className={cn(
-      "flex flex-col rounded-lg overflow-hidden bg-card",
-      "border-2",
-      isToday ? "border-primary" : "border-border",
-      mobile ? "min-h-[280px]" : "h-full",
+      "flex flex-col gap-2 rounded-[24px] border p-2 min-w-0",
+      isToday ? "bg-accent/60 border-primary/30" : "bg-card border-border",
+      mobile ? "min-h-[280px] p-3 gap-3" : "h-full overflow-y-auto",
     )}>
       {/* Day header */}
-      <div className={cn(
-        "shrink-0 px-3 py-2",
-        isToday
-          ? "bg-primary text-primary-foreground"
-          : "bg-muted border-b-2 border-border",
-      )}>
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-base font-bold">
-            {mobile ? DAY_FULL[dayIdx] : DAY_LABELS[dayIdx]}
-          </span>
-          <span className={cn("text-sm font-medium", isToday ? "opacity-80" : "text-muted-foreground")}>
-            {day.getDate()}
-          </span>
-          {isToday && (
-            <span className="ml-auto text-xs font-bold uppercase tracking-wider opacity-75">
-              Today
-            </span>
+      <div className="shrink-0 flex items-center gap-2 px-1.5 pt-1">
+        <span className={cn(
+          "flex flex-col items-center justify-center rounded-xl px-2.5 py-1 min-w-[44px]",
+          isToday ? "bg-foreground text-background" : "bg-secondary text-foreground",
+        )}>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.06em]">{DAY_LABELS[dayIdx]}</span>
+          <span className="font-display text-[19px] font-semibold leading-none">{day.getDate()}</span>
+        </span>
+        <div className="min-w-0">
+          {mobile && <p className="font-display text-[19px] font-semibold leading-tight">{DAY_FULL[dayIdx]}</p>}
+          {isToday && !mobile && <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-primary">Today</p>}
+          {dayPlants && dayPlants.count > 0 && (
+            <p className="text-[12px] font-semibold text-accent-foreground">
+              {dayPlants.count} plant{dayPlants.count !== 1 ? "s" : ""}
+            </p>
           )}
         </div>
-        <p className="text-[10px] font-semibold mt-0.5 opacity-70 invisible-placeholder"
-          style={{ visibility: dayPlants && dayPlants.count > 0 ? "visible" : "hidden" }}>
-          {dayPlants && dayPlants.count > 0
-            ? `${dayPlants.count} plant${dayPlants.count !== 1 ? "s" : ""}`
-            : "0 plants"}
-        </p>
       </div>
 
-      {/* Meal slots — uniform dividers via divide-y */}
-      <div className={cn("flex flex-col flex-1 divide-y-2", isToday ? "divide-primary/20" : "divide-border")}>
-        <MealSlot
-          label="Dinner"
-          emoji={MEAL_EMOJIS.dinner}
-          meal={dinnerMeal}
-          mobile={mobile}
-          onClick={() => onSlotClick("dinner", dinnerMeal, null, null)}
-        />
+      <MealSlot label="Dinner" meal={dinnerMeal} mobile={mobile} highlight
+        onClick={() => onSlotClick("dinner", dinnerMeal, null, null)} />
 
-        <MealSlot
-          label="Lunch"
-          emoji={MEAL_EMOJIS.lunch}
-          meal={lunchMeal}
-          mobile={mobile}
-          onClick={() => onSlotClick("lunch", lunchMeal, null, null)}
-        />
+      <MealSlot label="Lunch" meal={lunchMeal} mobile={mobile}
+        onClick={() => onSlotClick("lunch", lunchMeal, null, null)} />
 
-        {childMembers.map((child) => {
-          const meal = getLunchbox(child.id)
-          return (
-            <LunchboxSlot
-              key={child.id}
-              child={child}
-              meal={meal}
-              mobile={mobile}
-              onClick={() => onSlotClick("lunchbox", meal, child.id, child.name)}
-            />
-          )
-        })}
+      {childMembers.map((child) => {
+        const meal = getLunchbox(child.id)
+        return (
+          <LunchboxSlot key={child.id} child={child} meal={meal} mobile={mobile}
+            onClick={() => onSlotClick("lunchbox", meal, child.id, child.name)} />
+        )
+      })}
 
-        {childMembers.length === 0 && (
-          <MealSlot
-            label="Lunchbox"
-            emoji={MEAL_EMOJIS.lunchbox}
-            meal={null}
-            mobile={mobile}
-            onClick={() => onSlotClick("lunchbox", null, null, null)}
-          />
-        )}
-      </div>
+      {childMembers.length === 0 && (
+        <MealSlot label="Lunchbox" meal={null} mobile={mobile}
+          onClick={() => onSlotClick("lunchbox", null, null, null)} />
+      )}
     </div>
   )
 }
 
-// ── Generic meal slot (Dinner) ────────────────────────────────────────────────
+// ── Slot shell ──────────────────────────────────────────────────────────────────
 
-function MealSlot({ label, meal, mobile, onClick }: {
-  label: string; emoji?: string; meal: Meal | null; mobile: boolean; onClick: () => void
+function SlotShell({ filled, mobile, onClick, children, highlight = false }: {
+  filled: boolean; mobile: boolean; onClick: () => void; children: React.ReactNode; highlight?: boolean
 }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "group flex flex-col items-start w-full text-left transition-colors",
-        mobile ? "px-4 py-4 min-h-[100px]" : "px-3 py-3 flex-1 min-h-[80px]",
-        meal ? "hover:bg-accent/40" : "hover:bg-muted/50",
+        "group flex flex-col items-start gap-1 w-full text-left rounded-2xl transition-colors min-w-0",
+        mobile ? "px-4 py-3.5 min-h-[84px]" : "px-2.5 py-2.5 flex-1 min-h-[76px]",
+        filled
+          ? highlight
+            ? "bg-primary text-primary-foreground hover:bg-primary/90"
+            : "bg-background/70 border border-border hover:border-primary/40"
+          : "border-[1.5px] border-dashed border-input hover:bg-secondary/60",
       )}
     >
-      <div className="flex items-center gap-1.5 mb-2 shrink-0">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-      </div>
-      {meal ? (
-        <div className="flex-1 min-w-0 w-full">
-          <p className={cn("font-semibold leading-snug", mobile ? "text-lg" : "text-base")}>
-            {meal.title}
-          </p>
-          {meal.notes && (
-            <p className={cn(
-              "text-muted-foreground leading-snug mt-0.5 line-clamp-2",
-              mobile ? "text-base" : "text-sm",
-            )}>
-              {meal.notes}
-            </p>
-          )}
-        </div>
-      ) : (
-        <p className={cn("text-muted-foreground/40 italic", mobile ? "text-base" : "text-sm")}>
-          Tap to add…
+      {children}
+    </button>
+  )
+}
+
+function MealText({ meal, mobile, onPrimary = false }: { meal: Meal; mobile: boolean; onPrimary?: boolean }) {
+  return (
+    <div className="min-w-0 w-full">
+      <p className={cn("font-semibold leading-snug break-words", mobile ? "text-[17px]" : "text-[14px]")}>{meal.title}</p>
+      {meal.notes && (
+        <p className={cn(
+          "leading-snug mt-0.5 line-clamp-2",
+          onPrimary ? "opacity-80" : "text-muted-foreground",
+          mobile ? "text-[15px]" : "text-[12px]",
+        )}>
+          {meal.notes}
         </p>
       )}
-    </button>
+    </div>
+  )
+}
+
+function AddHint({ mobile }: { mobile: boolean }) {
+  return (
+    <span className={cn("flex items-center gap-1 text-muted-foreground font-medium", mobile ? "text-[15px]" : "text-[13px]")}>
+      <Plus className="size-3.5" /> Add
+    </span>
+  )
+}
+
+// ── Dinner / lunch slot ─────────────────────────────────────────────────────────
+
+function MealSlot({ label, meal, mobile, onClick, highlight = false }: {
+  label: string; meal: Meal | null; mobile: boolean; onClick: () => void; highlight?: boolean
+}) {
+  const onPrimary = Boolean(meal) && highlight
+  return (
+    <SlotShell filled={Boolean(meal)} mobile={mobile} onClick={onClick} highlight={highlight}>
+      <span className={cn(
+        "text-[11px] font-semibold uppercase tracking-[0.08em]",
+        onPrimary ? "opacity-80" : "text-muted-foreground",
+      )}>
+        {label}
+      </span>
+      {meal ? <MealText meal={meal} mobile={mobile} onPrimary={onPrimary} /> : <AddHint mobile={mobile} />}
+    </SlotShell>
   )
 }
 
@@ -563,51 +556,13 @@ function MealSlot({ label, meal, mobile, onClick }: {
 function LunchboxSlot({ child, meal, mobile, onClick }: {
   child: FamilyMember; meal: Meal | null; mobile: boolean; onClick: () => void
 }) {
-  const accentColor = child.color ?? "#6366f1"
-
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "group flex flex-col items-start w-full text-left transition-colors",
-        mobile ? "px-4 py-4 min-h-[100px]" : "px-3 py-3 flex-1 min-h-[80px]",
-        meal ? "hover:bg-accent/40" : "hover:bg-muted/50",
-      )}
-    >
-      {/* Child label badge */}
-      <div className="flex items-center gap-1.5 mb-2 shrink-0">
-        <span
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold"
-          style={{
-            backgroundColor: `${accentColor}20`,
-            color: accentColor,
-          }}
-        >
-          {child.avatar_emoji && <span className="leading-none">{child.avatar_emoji}</span>}
-          <span className="uppercase tracking-wider">{child.name}</span>
-        </span>
-      </div>
-
-      {meal ? (
-        <div className="flex-1 min-w-0 w-full">
-          <p className={cn("font-semibold leading-snug", mobile ? "text-lg" : "text-base")}>
-            {meal.title}
-          </p>
-          {meal.notes && (
-            <p className={cn(
-              "text-muted-foreground leading-snug mt-0.5 line-clamp-2",
-              mobile ? "text-base" : "text-sm",
-            )}>
-              {meal.notes}
-            </p>
-          )}
-        </div>
-      ) : (
-        <p className={cn("italic", mobile ? "text-base" : "text-sm")}
-          style={{ color: `${accentColor}60` }}>
-          Tap to add…
-        </p>
-      )}
-    </button>
+    <SlotShell filled={Boolean(meal)} mobile={mobile} onClick={onClick}>
+      <span className="flex items-center gap-1.5 min-w-0">
+        <MemberAvatar member={child} className="size-5 text-[11px]" />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">{child.name}</span>
+      </span>
+      {meal ? <MealText meal={meal} mobile={mobile} /> : <AddHint mobile={mobile} />}
+    </SlotShell>
   )
 }

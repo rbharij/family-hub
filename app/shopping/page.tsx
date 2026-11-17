@@ -364,8 +364,8 @@ export default function ShoppingPage() {
 
   if (lists.length === 0 || !activeTab) {
     return (
-      <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
-        <div className="flex gap-4 border-b pb-2">
+      <div className="flex flex-col lg:h-full p-4 lg:px-8 lg:py-7 gap-4">
+        <div className="flex gap-2">
           {[1,2,3,4].map(i => <Skeleton key={i} className="h-8 w-20 rounded" />)}
         </div>
         <div className="space-y-2 px-1">
@@ -378,12 +378,14 @@ export default function ShoppingPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col lg:h-full p-3 lg:p-4">
+    <div className="flex flex-col lg:h-full p-4 lg:px-8 lg:py-7 gap-4 lg:gap-5">
+
+      <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight shrink-0">Shopping</h1>
 
       {/* ── Custom tab row ─────────────────────────────────────────────────── */}
       <div
         role="tablist"
-        className="flex items-stretch border-b overflow-x-auto shrink-0"
+        className="flex items-center gap-1 overflow-x-auto shrink-0 rounded-2xl bg-secondary p-1 self-start max-w-full"
         onPointerMove={onTabRowPointerMove}
         onPointerUp={onTabRowPointerUp}
         onPointerCancel={onTabRowPointerUp}
@@ -412,12 +414,12 @@ export default function ShoppingPage() {
               }}
               className={cn(
                 "group relative flex items-center shrink-0",
-                "border-b-2 -mb-px transition-colors cursor-default",
+                "rounded-xl transition-colors cursor-default",
                 isActive
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30",
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
                 isDragged && "opacity-40",
-                isOver    && "bg-primary/5 border-primary/50",
+                isOver    && "bg-primary/10",
               )}
             >
               {isEditing ? (
@@ -460,7 +462,7 @@ export default function ShoppingPage() {
                   <button
                     onClick={() => setActiveTab(list.id)}
                     onPointerDown={e => e.stopPropagation()}
-                    className="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium"
+                    className="flex items-center gap-2 px-3.5 min-h-[40px] text-[15px] font-semibold"
                   >
                     {list.name}
                     {count > 0 && (
@@ -526,18 +528,18 @@ export default function ShoppingPage() {
           <button
             onClick={() => { setCreateName(""); setCreateOpen(true) }}
             className={cn(
-              "flex items-center gap-1 px-3 py-2.5 shrink-0 border-b-2 border-transparent -mb-px",
-              "text-sm text-muted-foreground hover:text-foreground transition-colors",
+              "flex items-center gap-1.5 px-3.5 min-h-[40px] shrink-0 rounded-xl",
+              "text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-card/60 transition-colors",
             )}
             aria-label="New list"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline text-xs">New list</span>
+            <span className="hidden sm:inline">New list</span>
           </button>
         ) : (
           <div
             title="Maximum 8 lists reached"
-            className="flex items-center px-3 py-2.5 text-muted-foreground/30 cursor-not-allowed border-b-2 border-transparent -mb-px"
+            className="flex items-center px-3.5 min-h-[40px] text-muted-foreground/30 cursor-not-allowed"
           >
             <Plus className="h-3.5 w-3.5" />
           </div>
@@ -665,16 +667,16 @@ function ListPanel({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 rounded-[28px] bg-card border border-border overflow-hidden">
       <div className="flex-1 overflow-y-auto">
         {/* Panel header */}
-        <div className="flex items-center justify-between px-4 pt-2 pb-1">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between px-5 pt-4 pb-2">
+          <span className="text-sm font-semibold text-muted-foreground tabular-nums">
             {unchecked.length} remaining · {checked.length} done
           </span>
           <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
             <DropdownMenuTrigger
-              className="inline-flex items-center justify-center h-7 w-7 rounded-md hover:bg-accent transition-colors"
+              className="inline-flex items-center justify-center size-10 rounded-xl hover:bg-secondary transition-colors"
               aria-label="List options"
             >
               <MoreHorizontal className="h-4 w-4" />
@@ -703,20 +705,20 @@ function ListPanel({
           </div>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-            <ShoppingCart className="h-10 w-10 opacity-30" />
-            <p className="text-base font-medium">List is empty</p>
+            <ShoppingCart className="size-9" />
+            <p className="text-base font-semibold">This list is empty</p>
             <p className="text-sm">Add items using the input below.</p>
           </div>
         ) : (
-          <ul className="divide-y">
+          <ul className="divide-y divide-border/70">
             {unchecked.map(item => (
               <ItemRow key={item.id} item={item}
                 onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
             ))}
             {unchecked.length > 0 && checked.length > 0 && (
-              <li className="px-4 py-1.5 bg-muted/30">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Done ({checked.length})
+              <li className="px-5 py-2 bg-secondary/50">
+                <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  In the trolley ({checked.length})
                 </span>
               </li>
             )}
@@ -729,11 +731,11 @@ function ListPanel({
       </div>
 
       {/* Add item bar */}
-      <div className="shrink-0 border-t bg-background pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="shrink-0 border-t border-border bg-card">
         {checked.length > 0 && (
           <div className="px-3 pt-2">
-            <Button variant="outline" size="sm"
-              className="w-full text-muted-foreground h-11 gap-1.5 text-sm"
+            <Button variant="outline"
+              className="w-full text-muted-foreground h-11 gap-1.5 text-sm rounded-xl bg-card"
               onClick={onClearCompleted}
             >
               <Check className="h-4 w-4" />
@@ -741,7 +743,7 @@ function ListPanel({
             </Button>
           </div>
         )}
-        <div className="px-3 py-3 space-y-2 max-w-2xl">
+        <div className="px-3 lg:px-4 py-3 space-y-2">
           <div className="flex gap-2">
             <Input
               ref={inputRef}
@@ -749,12 +751,12 @@ function ListPanel({
               onChange={e => setDraft(e.target.value)}
               onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && handleAdd()}
               placeholder={`Add to ${list.name}…`}
-              className="flex-1 h-11 text-base"
+              className="flex-1 h-12 text-base rounded-xl bg-background/60"
             />
             <Button
               onClick={handleAdd}
               disabled={!draft.trim() || adding}
-              className="h-11 px-4 shrink-0 gap-1.5"
+              className="h-12 px-5 shrink-0 gap-1.5 rounded-xl"
             >
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               <span className="hidden sm:inline">Add</span>
@@ -850,7 +852,7 @@ function ItemRow({
 
   if (editing) {
     return (
-      <li className="flex items-center gap-2 px-4 py-2 min-h-[52px] bg-accent/30">
+      <li className="flex items-center gap-2 px-5 py-2 min-h-[56px] bg-accent/40">
         <Input ref={editRef} value={editName}
           onChange={e => setEditName(e.target.value)}
           onKeyDown={onEditKeyDown} onBlur={commitEdit}
@@ -878,8 +880,8 @@ function ItemRow({
   return (
     <li
       className={cn(
-        "group flex items-center gap-3 px-4 transition-colors select-none min-h-[52px]",
-        item.completed ? "bg-muted/20 hover:bg-muted/30" : "hover:bg-muted/10",
+        "group flex items-center gap-3.5 px-5 transition-colors select-none min-h-[56px]",
+        item.completed ? "bg-secondary/30 hover:bg-secondary/50" : "hover:bg-secondary/30",
       )}
       onPointerDown={onPointerDown} onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel} onContextMenu={onContextMenu}
@@ -887,11 +889,11 @@ function ItemRow({
       <Checkbox
         checked={item.completed}
         onCheckedChange={() => { if (!didLongPress.current) onToggle(item); didLongPress.current = false }}
-        className={cn("h-5 w-5 shrink-0 rounded-full border-2 transition-all", item.completed && "opacity-50")}
+        className={cn("size-6 shrink-0 rounded-full border-2 transition-all", item.completed && "opacity-60")}
         aria-label={`Mark ${item.name} ${item.completed ? "incomplete" : "complete"}`}
       />
       <span
-        className={cn("flex-1 text-base lg:text-lg font-medium cursor-pointer", item.completed && "line-through text-muted-foreground")}
+        className={cn("flex-1 text-[16px] lg:text-[17px] font-medium cursor-pointer", item.completed && "line-through text-muted-foreground")}
         onClick={() => { if (!didLongPress.current) onToggle(item); didLongPress.current = false }}
       >
         {item.name}
