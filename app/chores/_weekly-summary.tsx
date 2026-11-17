@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import confetti from "canvas-confetti"
 import { ChevronLeft, ChevronRight, X, Printer, CheckCircle2, Circle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -62,7 +62,8 @@ export function WeeklySummary({ members, initialWeekStart, onClose }: WeeklySumm
   const firedConfetti = useRef(new Set<string>())
   const supabase = useRef(createClient()).current
 
-  const weekEnd = addDays(weekStart, 6)
+  // Memoised: a new Date every render would re-create fetchChores and refetch in a loop
+  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart])
   const days = weekDays(weekStart)
 
   // ── Fetch chores for displayed week ────────────────────────────────────────

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight, Plus, CheckCircle2, Circle, Pencil, Trash2, BarChart2, CalendarDays, ClipboardList, RefreshCw, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -95,7 +95,8 @@ export default function ChoresPage() {
   const supabase = useRef(createClient()).current
 
   const days = weekDays(weekStart)
-  const weekEnd = addDays(weekStart, 6)
+  // Memoised: a new Date every render would re-create fetchChores and refetch in a loop
+  const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart])
 
   // ── Fetch data ────────────────────────────────────────────────────────────
 
@@ -460,7 +461,7 @@ export default function ChoresPage() {
 
       {/* ── Mobile: day view with swipe ──────────────────────────────────── */}
       <div className="lg:hidden flex flex-col gap-4" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        {loading ? (
+        {loading && chores.length === 0 ? (
           <div className="space-y-3">
             {[1, 2].map((i) => <Skeleton key={i} className="h-36 rounded-3xl" />)}
           </div>
