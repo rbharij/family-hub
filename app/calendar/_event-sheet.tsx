@@ -677,9 +677,9 @@ export function CreateEventButton() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button size="sm" className="h-8 gap-1.5" onClick={() => setOpen(true)}>
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">New Event</span>
+      <Button className="gap-2" onClick={() => setOpen(true)}>
+        <Plus className="size-[18px]" />
+        <span className="hidden sm:inline">New event</span>
       </Button>
       <EventSheet event={null} open={open} onClose={() => setOpen(false)} />
     </>

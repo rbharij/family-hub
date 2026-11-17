@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -11,7 +11,6 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import {
   addDays,
   buildCalendarGrid,
-  chipTextColor,
   isSameDay,
   layoutWeekEvents,
   startOfDay,
@@ -38,11 +37,11 @@ const MONTH_NAMES   = [
 ]
 
 /** px reserved for the day-number badge at the top of each cell */
-const DAY_H = 36
+const DAY_H = 42
 /** px per event track (bar height + gap) */
-const TRACK_H = 28
+const TRACK_H = 26
 /** fallback colour when an event has no colour set */
-const DEFAULT_COLOR = "#3b82f6"
+const DEFAULT_COLOR = "#3D6B57"
 /** How many days ahead to show in the agenda view */
 const AGENDA_DAYS = 90
 
@@ -61,7 +60,7 @@ function formatSyncAge(ts: number): string {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-AU", {
+  return new Date(iso).toLocaleTimeString("en-GB", {
     hour: "numeric", minute: "2-digit", hour12: true,
   })
 }
@@ -128,6 +127,8 @@ export default function CalendarPage() {
   const [sheetOpen, setSheetOpen]     = useState(false)
   // Mobile agenda: selected date for jumping (null = show from today)
   const [agendaAnchor, setAgendaAnchor] = useState<Date>(today)
+  // Desktop: day shown in the side panel
+  const [selectedDay, setSelectedDay] = useState<Date>(today)
 
   const [birthdays, setBirthdays] = useState<BirthdayRow[]>([])
   const [selectedBirthday, setSelectedBirthday] = useState<BirthdayRow|null>(null)
@@ -250,6 +251,7 @@ export default function CalendarPage() {
   function goToday() {
     setYm({ year: today.getFullYear(), month: today.getMonth() })
     setAgendaAnchor(today)
+    setSelectedDay(today)
   }
 
   // When mobile strip month changes, sync agenda anchor to 1st of that month
@@ -292,296 +294,320 @@ export default function CalendarPage() {
     return groups
   }, [events, birthdayEvents, agendaAnchor, today])
 
+  // ── Side panel data (desktop) ───────────────────────────────────────────────
+
+  const allEvents = useMemo(() => [...events, ...birthdayEvents], [events, birthdayEvents])
+
+  const eventsOn = useCallback((d: Date) => allEvents.filter((e) => {
+    const start = startOfDay(new Date(e.start_at))
+    const end   = e.end_at ? startOfDay(new Date(e.end_at)) : start
+    return start <= d && end >= d
+  }).sort((a, b) => Number(b.is_all_day) - Number(a.is_all_day) || a.start_at.localeCompare(b.start_at)),
+  [allEvents])
+
+  const selectedDayEvents = useMemo(() => eventsOn(selectedDay), [eventsOn, selectedDay])
+
+  const comingUp = useMemo(() => {
+    const out: { date: Date; event: CalEvent }[] = []
+    for (let i = 1; i <= 14 && out.length < 5; i++) {
+      const d = addDays(selectedDay, i)
+      for (const e of eventsOn(d)) {
+        if (isSameDay(startOfDay(new Date(e.start_at)), d)) out.push({ date: d, event: e })
+        if (out.length >= 5) break
+      }
+    }
+    return out
+  }, [eventsOn, selectedDay])
+
+  function openAny(ev: CalEvent) {
+    if (ev.id.startsWith(BIRTHDAY_PREFIX)) openBirthdayDetail(ev.id)
+    else openEvent(ev)
+  }
+
+  const isSelectedToday = isSameDay(selectedDay, today)
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col lg:h-full p-3 lg:p-4 gap-3">
+    <div className="flex flex-col lg:h-full p-4 lg:px-8 lg:py-7 gap-4 lg:gap-5">
 
-      {/* ── Shared month navigation header ──────────────────────────────── */}
-      <div className="flex items-center gap-2 shrink-0">
-        <Button variant="outline" size="icon"
-          className="h-11 w-11 lg:h-8 lg:w-8"
-          onClick={handleStripPrevMonth}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="icon"
-          className="h-11 w-11 lg:h-8 lg:w-8"
-          onClick={handleStripNextMonth}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <h2 className="text-lg font-semibold w-44 shrink-0">
-          {MONTH_NAMES[month]} {year}
-        </h2>
-        <Button variant="outline" size="sm" className="h-11 px-4 lg:h-8 lg:px-3" onClick={goToday}>
-          Today
-        </Button>
-        <Button variant="outline" size="sm" className="h-11 px-4 lg:h-8 lg:px-3 gap-1.5"
-          onClick={triggerSync} disabled={syncing}>
-          <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-          <span className="hidden sm:inline">Sync</span>
-        </Button>
-        {lastSyncedAt && !syncing && (
-          <span className="hidden sm:inline text-xs text-muted-foreground">
-            Synced {formatSyncAge(lastSyncedAt)}
-          </span>
-        )}
-        {syncing && (
-          <span className="hidden sm:inline text-xs text-muted-foreground animate-pulse">
-            Syncing…
-          </span>
-        )}
-        {loading && <span className="hidden sm:inline text-xs text-muted-foreground animate-pulse">Loading…</span>}
-        <div className="ml-auto"><CreateEventButton /></div>
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          DESKTOP: monthly grid
-      ══════════════════════════════════════════════════════════════════ */}
-      <ErrorBoundary label="Calendar grid">
-      <div className={cn(
-        "hidden lg:flex flex-col border rounded-lg overflow-hidden bg-background relative",
-        "lg:flex-1 lg:min-h-0",
-      )}>
-        {/* Weekday header row */}
-        <div className="grid grid-cols-7 border-b bg-muted/40 shrink-0">
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="py-2 text-center text-lg font-medium text-muted-foreground select-none">
-              {d}
-            </div>
-          ))}
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 lg:gap-3 shrink-0">
+        <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight lg:min-w-[250px] mr-1">
+          {MONTH_NAMES[month]} <span className="text-muted-foreground font-medium">{year}</span>
+        </h1>
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={handleStripPrevMonth} aria-label="Previous month">
+            <ChevronLeft className="size-5" />
+          </Button>
+          <Button variant="outline" size="icon" className="size-11 rounded-xl bg-card" onClick={handleStripNextMonth} aria-label="Next month">
+            <ChevronRight className="size-5" />
+          </Button>
+          <Button variant="outline" className="h-11 px-4 rounded-xl bg-card" onClick={goToday}>
+            Today
+          </Button>
         </div>
 
-        {/* Skeleton overlay while loading */}
-        {loading && (
-          <div className="absolute inset-0 z-20 p-4 flex flex-col gap-3 pointer-events-none">
-            {[1, 2, 3].map((r) => (
-              <div key={r} className="flex gap-2">
-                {[1, 2, 3, 4, 5].map((c) => (
-                  <Skeleton key={c} className="flex-1 h-5 rounded" />
-                ))}
+        <div className="ml-auto flex items-center gap-2 lg:gap-3">
+          <button
+            type="button"
+            onClick={triggerSync}
+            disabled={syncing}
+            className="hidden sm:flex items-center gap-2 h-11 px-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-card hover:text-foreground transition-colors disabled:opacity-70"
+            aria-label="Sync with Google Calendar"
+          >
+            <RefreshCw className={cn("size-4", syncing && "animate-spin")} />
+            {syncing ? "Syncing…" : loading ? "Loading…" : lastSyncedAt ? `Synced ${formatSyncAge(lastSyncedAt)}` : "Sync Google Calendar"}
+          </button>
+          <Button variant="outline" size="icon" className="sm:hidden size-11 rounded-xl bg-card" onClick={triggerSync} disabled={syncing} aria-label="Sync with Google Calendar">
+            <RefreshCw className={cn("size-4", syncing && "animate-spin")} />
+          </Button>
+          <CreateEventButton />
+        </div>
+      </div>
+
+      <ErrorBoundary label="Calendar grid">
+      {/* ══════════════════════════════════════════════════════════════════
+          DESKTOP: month grid + day panel
+      ══════════════════════════════════════════════════════════════════ */}
+      <div className="hidden lg:grid lg:flex-1 lg:min-h-0 gap-5" style={{ gridTemplateColumns: "minmax(0,1fr) 320px" }}>
+
+        <div className="flex flex-col min-h-0 rounded-[28px] bg-card border border-border p-3 relative">
+          {/* Weekday header row */}
+          <div className="grid grid-cols-7 shrink-0 pb-2 pt-1">
+            {WEEKDAYS.map((d) => (
+              <div key={d} className="text-center text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground select-none">
+                {d}
               </div>
             ))}
           </div>
-        )}
 
-        {/* Week rows */}
-        <div className="flex flex-col flex-1 min-h-0">
-          {weeks.map((week, wi) => {
-            const laid = layoutWeekEvents([...events, ...birthdayEvents], week)
-            const trackCount = laid.reduce((m, e) => Math.max(m, e.track + 1), 0)
-            const minRowH = Math.max(72, DAY_H + trackCount * TRACK_H + 6)
+          {loading && (
+            <div className="absolute inset-x-3 top-12 z-20 flex flex-col gap-3 pointer-events-none">
+              {[1, 2, 3].map((r) => (
+                <div key={r} className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((c) => (
+                    <Skeleton key={c} className="flex-1 h-5 rounded-lg" />
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
-            return (
-              <div key={wi} className="relative flex-1 grid grid-cols-7 border-b last:border-b-0"
-                style={{ minHeight: minRowH }}>
-                {week.map((day, di) => {
-                  const inMonth = day.getMonth() === month
-                  const isToday = isSameDay(day, today)
-                  return (
-                    <div key={di} className={cn(
-                      "border-r last:border-r-0 p-1 min-w-0",
-                      !isToday && !inMonth && "bg-muted/20",
-                    )}
-                    style={isToday ? { backgroundColor: "hsl(var(--primary) / 0.08)" } : undefined}
-                    >
-                      <div className="flex justify-center items-center h-9">
-                        <span className={cn(
-                          "flex items-center justify-center w-9 h-9 rounded-full",
-                          "text-lg font-medium select-none leading-none",
-                          isToday && "bg-primary text-primary-foreground font-bold",
-                          !isToday && inMonth && "text-foreground",
-                          !isToday && !inMonth && "text-muted-foreground",
+          {/* Week rows */}
+          <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+            {weeks.map((week, wi) => {
+              const laid = layoutWeekEvents(allEvents, week)
+              const trackCount = laid.reduce((m, e) => Math.max(m, e.track + 1), 0)
+              const minRowH = Math.max(84, DAY_H + trackCount * TRACK_H + 10)
+
+              return (
+                <div key={wi} className="relative flex-1 grid grid-cols-7" style={{ minHeight: minRowH }}>
+                  {week.map((day, di) => {
+                    const inMonth  = day.getMonth() === month
+                    const isToday  = isSameDay(day, today)
+                    const selected = isSameDay(day, selectedDay)
+                    return (
+                      <button
+                        key={di}
+                        type="button"
+                        onClick={() => setSelectedDay(startOfDay(day))}
+                        aria-pressed={selected}
+                        aria-label={day.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+                        className="p-[3px] min-w-0 text-left"
+                      >
+                        <div className={cn(
+                          "h-full rounded-2xl border-2 transition-colors",
+                          selected ? "border-primary bg-accent/50"
+                            : inMonth ? "border-transparent bg-background/50 hover:bg-secondary/60"
+                            : "border-transparent hover:bg-secondary/40",
                         )}>
-                          {day.getDate()}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })}
+                          <div className="flex items-center h-[38px] px-1.5">
+                            <span className={cn(
+                              "flex items-center justify-center size-8 rounded-full text-[15px] font-semibold select-none leading-none tabular-nums",
+                              isToday && "bg-foreground text-background",
+                              !isToday && inMonth && "text-foreground",
+                              !isToday && !inMonth && "text-muted-foreground/70",
+                            )}>
+                              {day.getDate()}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
 
-                {/* Event bars */}
-                {laid.map(({ event, startCol, endCol, track }) => {
-                  const bg = event.color || DEFAULT_COLOR
-                  const fg = chipTextColor(bg)
-                  const isSpanning = endCol > startCol
-                  const isBirthday = event.id.startsWith(BIRTHDAY_PREFIX)
-                  const daysAway = isBirthday ? Math.round((startOfDay(new Date(event.start_at)).getTime()-today.getTime())/86_400_000) : 0
-                  const truncatedTitle = event.title + (isBirthday && daysAway >= 1 && daysAway <= 7 ? ` · ${daysAway}d` : "") + (isBirthday && daysAway === 0 ? " 🎉" : "")
-                  return (
-                    <div key={`${event.id}-w${wi}`} title={event.title}
-                      onClick={() => isBirthday ? openBirthdayDetail(event.id) : openEvent(event)}
-                      className={cn(
-                        "absolute z-10 flex items-center overflow-hidden",
-                        "whitespace-nowrap cursor-pointer select-none",
-                        "text-base font-medium leading-none",
-                        "hover:brightness-110 hover:shadow-sm transition-[filter,box-shadow]",
-                        isSpanning ? "rounded-full px-2" : "rounded px-1.5",
-                        isBirthday && daysAway === 0 && "font-bold",
-                      )}
-                      style={{
-                        backgroundColor: bg, color: fg,
-                        top: DAY_H + track * TRACK_H,
-                        height: TRACK_H - 3,
-                        left: `calc(${(startCol / 7) * 100}% + 2px)`,
-                        width: `calc(${((endCol - startCol + 1) / 7) * 100}% - 4px)`,
-                      }}
-                    >
-                      <span className="truncate">{truncatedTitle}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })}
+                  {/* Event bars */}
+                  {laid.map(({ event, startCol, endCol, track }) => {
+                    const color = event.color || DEFAULT_COLOR
+                    const isBirthday = event.id.startsWith(BIRTHDAY_PREFIX)
+                    const daysAway = isBirthday ? Math.round((startOfDay(new Date(event.start_at)).getTime() - today.getTime()) / 86_400_000) : 0
+                    return (
+                      <button
+                        type="button"
+                        key={`${event.id}-w${wi}`}
+                        title={event.title}
+                        onClick={() => openAny(event)}
+                        className={cn(
+                          "absolute z-10 flex items-center gap-1.5 overflow-hidden whitespace-nowrap select-none",
+                          "rounded-lg px-2 text-[12.5px] font-semibold leading-none text-foreground",
+                          "hover:brightness-95 dark:hover:brightness-125 transition-[filter]",
+                          isBirthday && daysAway === 0 && "font-bold",
+                        )}
+                        style={{
+                          backgroundColor: `${color}2E`,
+                          boxShadow: `inset 3px 0 0 ${color}`,
+                          top: DAY_H + track * TRACK_H,
+                          height: TRACK_H - 4,
+                          left: `calc(${(startCol / 7) * 100}% + 8px)`,
+                          width: `calc(${((endCol - startCol + 1) / 7) * 100}% - 16px)`,
+                        }}
+                      >
+                        <span className="truncate">{event.title}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
         </div>
+
+        {/* ── Day panel ─────────────────────────────────────────────────── */}
+        <aside className="flex flex-col gap-5 min-h-0">
+          <section className="rounded-[28px] bg-card border border-border p-6 flex flex-col gap-4 min-h-0">
+            <div>
+              <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {isSelectedToday ? "Today" : selectedDay.toLocaleDateString("en-GB", { weekday: "long" })}
+              </p>
+              <h2 className="font-display text-[24px] font-semibold leading-tight">
+                {selectedDay.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+              </h2>
+            </div>
+
+            {selectedDayEvents.length === 0 ? (
+              <div className="rounded-2xl border-[1.5px] border-dashed border-input px-4 py-6 flex flex-col items-center gap-2 text-center">
+                <CalendarDays className="size-6 text-muted-foreground" />
+                <p className="text-[15px] text-muted-foreground">Nothing planned</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5 overflow-y-auto min-h-0">
+                {selectedDayEvents.map((ev) => (
+                  <PanelEvent key={ev.id} ev={ev} onOpen={() => openAny(ev)} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {comingUp.length > 0 && (
+            <section className="rounded-[28px] bg-card border border-border p-6 flex flex-col gap-3.5 min-h-0">
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Coming up</h2>
+              {comingUp.map(({ date, event }) => (
+                <button
+                  key={`${event.id}-${toDateStr(date)}`}
+                  type="button"
+                  onClick={() => openAny(event)}
+                  className="flex items-center gap-3 text-left rounded-xl -mx-2 px-2 py-1 hover:bg-secondary/60 transition-colors"
+                >
+                  <span className="flex w-11 shrink-0 flex-col items-center rounded-xl bg-secondary py-1.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.06em]">
+                      {date.toLocaleDateString("en-GB", { weekday: "short" })}
+                    </span>
+                    <span className="font-display text-[18px] font-semibold leading-tight">{date.getDate()}</span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-semibold">{event.title}</span>
+                    <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                      <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: event.color || DEFAULT_COLOR }} />
+                      {event.id.startsWith(BIRTHDAY_PREFIX) ? "All day" : event.is_all_day ? "All day" : formatTime(event.start_at)}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </section>
+          )}
+        </aside>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
           MOBILE: compact month strip + agenda list
       ══════════════════════════════════════════════════════════════════ */}
-      <div className="lg:hidden flex flex-col flex-1 min-h-0 gap-0 border rounded-lg overflow-hidden bg-background">
+      <div className="lg:hidden flex flex-col gap-4">
 
-        {/* ── Compact month strip ─────────────────────────────────────── */}
-        <div className="shrink-0 border-b bg-muted/20">
-          {/* Weekday labels */}
-          <div className="grid grid-cols-7 px-1 pt-1">
+        <div className="rounded-3xl bg-card border border-border p-2">
+          <div className="grid grid-cols-7 pt-1">
             {WEEKDAYS_MIN.map((d, i) => (
-              <div key={i} className="text-center text-base font-medium text-muted-foreground py-1">
-                {d}
-              </div>
+              <div key={i} className="text-center text-[12px] font-semibold text-muted-foreground py-1">{d}</div>
             ))}
           </div>
-          {/* Day cells */}
-          <div className="px-1 pb-1">
-            {weeks.map((week, wi) => (
-              <div key={wi} className="grid grid-cols-7">
-                {week.map((day, di) => {
-                  const inMonth  = day.getMonth() === month
-                  const isToday  = isSameDay(day, today)
-                  const isAnchor = isSameDay(day, agendaAnchor)
-                  const hasEvent = events.some((e) => {
-                    const s = startOfDay(new Date(e.start_at))
-                    const en = e.end_at ? startOfDay(new Date(e.end_at)) : s
-                    return s <= day && en >= day
-                  })
-                  return (
-                    <button
-                      key={di}
-                      onClick={() => {
-                        setAgendaAnchor(startOfDay(day))
-                        // Keep month strip in sync if tapping an adjacent-month day
-                        if (!inMonth) {
-                          setYm({ year: day.getFullYear(), month: day.getMonth() })
-                        }
-                      }}
-                      className={cn(
-                        "relative flex flex-col items-center justify-center",
-                        "min-h-[44px] rounded-lg transition-colors",
-                        isAnchor
-                          ? "bg-primary text-primary-foreground"
-                          : isToday
-                          ? "text-primary font-bold"
-                          : inMonth
-                          ? "text-foreground hover:bg-muted"
-                          : "text-muted-foreground/50 hover:bg-muted",
-                      )}
-                    >
-                      <span className="text-xl leading-none">{day.getDate()}</span>
+          {weeks.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7">
+              {week.map((day, di) => {
+                const inMonth  = day.getMonth() === month
+                const isToday  = isSameDay(day, today)
+                const isAnchor = isSameDay(day, agendaAnchor)
+                const hasEvent = events.some((e) => {
+                  const s = startOfDay(new Date(e.start_at))
+                  const en = e.end_at ? startOfDay(new Date(e.end_at)) : s
+                  return s <= day && en >= day
+                })
+                return (
+                  <button
+                    key={di}
+                    onClick={() => {
+                      setAgendaAnchor(startOfDay(day))
+                      if (!inMonth) setYm({ year: day.getFullYear(), month: day.getMonth() })
+                    }}
+                    className="flex items-center justify-center min-h-[44px]"
+                    aria-label={day.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+                  >
+                    <span className={cn(
+                      "relative flex flex-col items-center justify-center size-10 rounded-full transition-colors",
+                      isAnchor ? "bg-primary text-primary-foreground"
+                        : isToday ? "bg-foreground text-background"
+                        : inMonth ? "text-foreground" : "text-muted-foreground/50",
+                    )}>
+                      <span className="text-[16px] font-semibold leading-none tabular-nums">{day.getDate()}</span>
                       {hasEvent && (
                         <span className={cn(
-                          "mt-0.5 h-1 w-1 rounded-full",
-                          isAnchor ? "bg-primary-foreground" : "bg-primary",
+                          "absolute bottom-1 size-1 rounded-full",
+                          isAnchor || isToday ? "bg-current" : "bg-primary",
                         )} />
                       )}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-          </div>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </div>
 
-        {/* ── Agenda list ─────────────────────────────────────────────── */}
-        <div ref={agendaRef} className="flex-1 overflow-y-auto">
+        <div ref={agendaRef} className="flex flex-col gap-4">
           {loading ? (
-            <div className="px-4 py-4 space-y-3">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="h-8 rounded" />
-                  <Skeleton className="h-12 rounded" />
-                </div>
-              ))}
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 rounded-3xl" />)}
             </div>
           ) : agendaGroups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-              <span className="text-5xl select-none">📅</span>
-              <p className="text-base font-medium">No upcoming events</p>
-              <p className="text-sm text-center px-8">
-                Nothing planned in the next {AGENDA_DAYS} days.<br />Tap <strong>+ New Event</strong> to add one.
-              </p>
+            <div className="rounded-3xl border-[1.5px] border-dashed border-input flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+              <CalendarDays className="size-8" />
+              <p className="text-base font-semibold">Nothing coming up</p>
+              <p className="text-sm text-center px-8">Nothing planned in the next {AGENDA_DAYS} days.</p>
             </div>
           ) : (
             agendaGroups.map(({ date, dateStr, events: dayEvents }) => {
               const isToday = isSameDay(date, today)
               return (
-                <div key={dateStr}>
-                  {/* Date heading */}
-                  <div className={cn(
-                    "sticky top-0 z-10 px-4 py-2 border-b",
-                    isToday
-                      ? "bg-primary/10 border-primary/20"
-                      : "bg-muted/40",
-                  )}>
-                    <span className={cn(
-                      "text-xl font-semibold",
-                      isToday ? "text-primary" : "text-foreground",
-                    )}>
-                      {isToday ? "Today · " : ""}
-                      {date.toLocaleDateString("en-AU", {
-                        weekday: "short", day: "numeric", month: "short",
-                      })}
-                    </span>
-                  </div>
-
-                  {/* Events for this day */}
+                <section key={dateStr} className="flex flex-col gap-2">
+                  <h3 className={cn("px-1 text-[15px] font-semibold", isToday ? "text-primary" : "text-muted-foreground")}>
+                    {isToday ? "Today · " : ""}
+                    {date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}
+                  </h3>
                   {dayEvents.length === 0 ? (
-                    <div className="px-4 py-3">
-                      <span className="text-lg text-muted-foreground italic">No events</span>
-                    </div>
+                    <p className="rounded-2xl bg-card border border-border px-4 py-3 text-[15px] text-muted-foreground">Nothing planned</p>
                   ) : (
-                    dayEvents.map((ev) => {
-                      const isBirthday = ev.id.startsWith(BIRTHDAY_PREFIX)
-                      const bdDaysAway = isBirthday ? Math.round((startOfDay(new Date(ev.start_at)).getTime()-today.getTime())/86_400_000) : 0
-                      return (
-                        <button
-                          key={ev.id}
-                          onClick={() => isBirthday ? openBirthdayDetail(ev.id) : openEvent(ev)}
-                          className="w-full flex items-start gap-3 px-4 py-3 border-b last:border-b-0 hover:bg-muted/30 transition-colors text-left min-h-[44px]"
-                        >
-                          {/* Colour stripe */}
-                          <div
-                            className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: ev.color ?? DEFAULT_COLOR }}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xl font-medium leading-snug">{ev.title}</p>
-                            <p className="text-lg text-muted-foreground mt-0.5">
-                              {isBirthday
-                                ? (bdDaysAway === 0 ? "Today! 🎉" : `in ${bdDaysAway} days`)
-                                : (
-                                  <>
-                                    {formatTime(ev.start_at)}
-                                    {ev.end_at && <> – {formatTime(ev.end_at)}</>}
-                                  </>
-                                )
-                              }
-                            </p>
-                          </div>
-                        </button>
-                      )
-                    })
+                    dayEvents.map((ev) => <PanelEvent key={ev.id} ev={ev} onOpen={() => openAny(ev)} today={today} />)
                   )}
-                </div>
+                </section>
               )
             })
           )}
@@ -613,5 +639,38 @@ export default function CalendarPage() {
         </Dialog>
       )}
     </div>
+  )
+}
+
+// ── Event card used in the day panel and mobile agenda ──────────────────────────
+
+function PanelEvent({ ev, onOpen, today }: { ev: CalEvent; onOpen: () => void; today?: Date }) {
+  const color = ev.color || DEFAULT_COLOR
+  const isBirthday = ev.id.startsWith(BIRTHDAY_PREFIX)
+  let when: string
+  if (isBirthday) {
+    const away = today ? Math.round((startOfDay(new Date(ev.start_at)).getTime() - today.getTime()) / 86_400_000) : null
+    when = away === 0 ? "Today!" : away !== null && away > 0 ? `In ${away} days` : "All day"
+  } else if (ev.is_all_day) {
+    when = "All day"
+  } else {
+    when = formatTime(ev.start_at) + (ev.end_at ? ` to ${formatTime(ev.end_at)}` : "")
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full gap-3 rounded-2xl p-3.5 text-left transition-[filter] hover:brightness-95 dark:hover:brightness-125"
+      style={{ backgroundColor: `${color}24` }}
+    >
+      <span className="w-1 shrink-0 self-stretch rounded-full" style={{ backgroundColor: color }} />
+      <span className="min-w-0 flex-1 flex flex-col gap-1">
+        <span className="flex items-center gap-1.5 text-[16px] font-semibold leading-snug">
+          <span className="truncate">{ev.title}</span>
+        </span>
+        <span className="text-[14px] text-muted-foreground">{when}</span>
+        {ev.location && <span className="text-[13px] text-muted-foreground truncate">{ev.location}</span>}
+      </span>
+    </button>
   )
 }
