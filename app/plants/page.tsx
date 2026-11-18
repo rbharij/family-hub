@@ -14,6 +14,7 @@ import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import { PlantPicker, type Plant } from "./_plant-picker"
 import { MemberSelector, type FamilyMember } from "./_member-selector"
+import { MemberAvatar } from "@/components/member-avatar"
 import { GrowingPlant } from "./_growing-plant"
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -146,7 +147,7 @@ export default function PlantsPage() {
         .select("id, name, emoji, category, times_eaten, first_eaten_date")
         .order("name"),
       supabase.from("family_members")
-        .select("id, name, avatar_emoji, color")
+        .select("*")
         .order("created_at"),
       supabase.from("member_weekly_plants")
         .select("plant_id, member_id, added_by, created_at")
@@ -492,7 +493,11 @@ export default function PlantsPage() {
                     {/* Ring with avatar in centre */}
                     <div className="relative flex items-center justify-center">
                       <MiniRing pct={pct} color={goal ? "#22c55e" : color} size={64} />
-                      <span className="absolute text-2xl leading-none">{m.avatar_emoji ?? "👤"}</span>
+                      <span className="absolute">
+                        {m.avatar_url
+                          ? <MemberAvatar member={m} className="size-11" />
+                          : <span className="text-2xl leading-none">{m.avatar_emoji ?? "👤"}</span>}
+                      </span>
                     </div>
                     <div className="text-center">
                       <p className="text-sm font-bold leading-tight truncate max-w-[96px]"
@@ -545,12 +550,7 @@ export default function PlantsPage() {
           >
             {/* Section header */}
             <div className="flex items-center gap-3 px-5 py-4 border-b border-border/70">
-              <span
-                className="text-3xl leading-none p-2 rounded-full shrink-0"
-                style={{ backgroundColor: `${color}22` }}
-              >
-                {m.avatar_emoji ?? "👤"}
-              </span>
+              <MemberAvatar member={{ ...m, color }} className="size-12 text-[26px]" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-display text-[20px] font-semibold">{m.name}</h3>

@@ -103,7 +103,7 @@ export default function ChoresPage() {
   const fetchMembers = useCallback(async () => {
     const { data } = await supabase
       .from("family_members")
-      .select("id, name, avatar_emoji, color, is_child")
+      .select("*")
       .order("created_at")
     setMembers(data ?? [])
   }, [supabase])

@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { GrowingPlant } from "@/app/plants/_growing-plant"
+import { MemberAvatar } from "@/components/member-avatar"
 import { useAppSettings } from "@/lib/app-settings-context"
 
 // ── Weather ────────────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ interface Member {
   id: string
   name: string
   avatar_emoji: string | null
+  avatar_url?: string | null
   color: string | null
 }
 
@@ -173,7 +175,7 @@ export default function WallPage() {
         .gte("start_at", addDays(today, -30).toISOString())
         .lt("start_at", weekEnd.toISOString())
         .order("start_at"),
-      supabase.from("family_members").select("id,name,avatar_emoji,color").order("created_at"),
+      supabase.from("family_members").select("*").order("created_at"),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", todayStr),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", tomorrowStr),
       supabase.from("meals").select("id,title,meal_type,date,notes,for_member_id").in("date", [todayStr, tomorrowStr]),
@@ -459,21 +461,8 @@ function Kicker({ children, className }: { children: React.ReactNode; className?
   )
 }
 
-/** Coloured circle per family member: their emoji if set, otherwise their initial. */
 function Avatar({ member, className }: { member: Member | null | undefined; className?: string }) {
-  const color = member?.color ?? "#8C8279"
-  const emoji = member?.avatar_emoji
-  return (
-    <span
-      title={member?.name}
-      className={cn("inline-flex shrink-0 items-center justify-center rounded-full font-semibold leading-none", className)}
-      style={emoji
-        ? { backgroundColor: `${color}2E`, boxShadow: `inset 0 0 0 2px ${color}` }
-        : { backgroundColor: color, color: "#FFFFFF" }}
-    >
-      {emoji ?? (member?.name?.[0]?.toUpperCase() ?? "?")}
-    </span>
-  )
+  return <MemberAvatar member={member} className={className} />
 }
 
 // ── Meals ──────────────────────────────────────────────────────────────────────

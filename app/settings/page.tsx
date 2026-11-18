@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   RefreshCw, Loader2, Plus, Pencil, Trash2, Check, X,
-  Users, Palette, CalendarSync, Home, Tv2,
+  Users, Palette, CalendarSync, Home, Tv2, Camera,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
+import { uploadMemberPhoto } from "@/lib/avatar-upload"
+import { MemberAvatar } from "@/components/member-avatar"
 import { useAppSettings } from "@/lib/app-settings-context"
 import { useIdleTimeout } from "@/lib/idle-timeout-context"
 import { Switch } from "@/components/ui/switch"
@@ -57,6 +59,7 @@ interface Member {
   id: string
   name: string
   avatar_emoji: string | null
+  avatar_url?: string | null
   color: string | null
   is_child: boolean
 }
@@ -64,6 +67,7 @@ interface Member {
 interface MemberForm {
   name: string
   avatar_emoji: string
+  avatar_url: string | null
   color: string
   is_child: boolean
 }
@@ -71,6 +75,7 @@ interface MemberForm {
 const defaultForm = (): MemberForm => ({
   name: "",
   avatar_emoji: "🧑",
+  avatar_url: null,
   color: COLORS[5],
   is_child: false,
 })
@@ -146,7 +151,7 @@ export default function SettingsPage() {
   const fetchMembers = useCallback(async () => {
     const { data } = await supabase
       .from("family_members")
-      .select("id, name, avatar_emoji, color, is_child")
+      .select("*")
       .order("created_at")
     setMembers(data ?? [])
     setLoadingMembers(false)
@@ -198,6 +203,7 @@ export default function SettingsPage() {
     setEditForm({
       name: m.name,
       avatar_emoji: m.avatar_emoji ?? "🧑",
+      avatar_url: m.avatar_url ?? null,
       color: m.color ?? COLORS[5],
       is_child: m.is_child,
     })
@@ -217,6 +223,7 @@ export default function SettingsPage() {
       .update({
         name: editForm.name.trim(),
         avatar_emoji: editForm.avatar_emoji,
+        avatar_url: editForm.avatar_url,
         color: editForm.color,
         is_child: editForm.is_child,
       })
@@ -250,6 +257,7 @@ export default function SettingsPage() {
       .insert({
         name: newForm.name.trim(),
         avatar_emoji: newForm.avatar_emoji,
+        avatar_url: newForm.avatar_url,
         color: newForm.color,
         is_child: newForm.is_child,
       })
@@ -719,7 +727,7 @@ function MemberRow({
 }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 border rounded-xl bg-background hover:bg-muted/30 transition-colors">
-      <span className="text-2xl leading-none shrink-0">{member.avatar_emoji ?? "🧑"}</span>
+      <MemberAvatar member={member} className="size-10 text-[20px]" />
       <div
         className="w-3 h-3 rounded-full shrink-0"
         style={{ backgroundColor: member.color ?? "#6366f1" }}
@@ -920,6 +928,9 @@ function MemberEditRow({
 }) {
   return (
     <div className="border rounded-xl p-3 space-y-3 bg-muted/20">
+      {/* Photo row */}
+      <PhotoPicker form={form} onChange={onChange} />
+
       {/* Name row */}
       <div className="flex items-center gap-2">
         <button
@@ -1004,6 +1015,68 @@ function MemberEditRow({
             : <Check className="h-3.5 w-3.5" />}
           {isNew ? "Add" : "Save"}
         </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Photo picker ──────────────────────────────────────────────────────────────
+
+function PhotoPicker({ form, onChange }: { form: MemberForm; onChange: (f: MemberForm) => void }) {
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return
+    setUploading(true)
+    try {
+      const url = await uploadMemberPhoto(createClient(), file)
+      onChange({ ...form, avatar_url: url })
+      toast.success("Photo added. Save to keep it.")
+    } catch (err) {
+      toast.error(err instanceof Error ? `Couldn't upload photo: ${err.message}` : "Couldn't upload photo")
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ""
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <MemberAvatar
+        member={{ name: form.name, avatar_emoji: form.avatar_emoji, avatar_url: form.avatar_url, color: form.color }}
+        className="size-14 text-[26px]"
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          id={`photo-${form.name || "new"}`}
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2 rounded-xl bg-card"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+          {form.avatar_url ? "Change photo" : "Upload photo"}
+        </Button>
+        {form.avatar_url && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-xl text-muted-foreground"
+            onClick={() => onChange({ ...form, avatar_url: null })}
+            disabled={uploading}
+          >
+            Use emoji instead
+          </Button>
+        )}
       </div>
     </div>
   )

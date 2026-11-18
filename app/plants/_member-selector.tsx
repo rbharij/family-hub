@@ -6,6 +6,7 @@ export interface FamilyMember {
   id: string
   name: string
   avatar_emoji: string | null
+  avatar_url?: string | null
   color: string | null
 }
 
