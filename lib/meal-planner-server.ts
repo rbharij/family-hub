@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   addDaysStr, weekDates, weekdayIndex, daysBetween, buildShoppingList, shoppingItemLabel,
   SCHOOL_LUNCH_TITLE, FREEZER_OLD_DAYS,
-  type WeekPlan, type PlanDay, type PlannedMeal, type PlannedLunchbox, type PlannerSettings,
+  type WeekPlan, type PlanDay, type PlannedMeal, type PlannedLunchbox, type PlannerSettings, type RecipeDetail,
   type FreezerItem, type MealPlanRow, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
 
@@ -291,6 +291,8 @@ Variety and preferences:
 
 Ingredients: for each meal cooked from scratch, list ingredients with realistic quantities for this household (metric). Leave out basic store-cupboard items (salt, pepper, cooking oil, common dried spices) and anything the household notes say is always stocked. No ingredients for freezer, batch or leftover meals.
 
+Choices: for every dinner that is not LOCKED or a fixed favourite, also give 2 alternatives in "alternatives" that suit the same day just as well (title, short note, source, cook_minutes, effort; no ingredients). Make the three clearly different from each other, e.g. a different protein or cuisine.
+
 Keep notes short (under 15 words). Return the plan with the submit_week_plan tool.`
 
 function buildUserPrompt(ctx: PlannerContext, locked: LockedMap, extra?: string): string {
@@ -334,6 +336,25 @@ const MEAL_PROPS = {
 
 const MEAL_SCHEMA = { type: ["object", "null"], properties: MEAL_PROPS, required: ["title", "source"] }
 
+/** Light alternative: enough to choose from; full details are filled in when chosen */
+const ALT_SCHEMA = {
+  type: "object",
+  properties: {
+    title:        { type: "string" },
+    notes:        { type: "string" },
+    source:       MEAL_PROPS.source,
+    cook_minutes: { type: "integer" },
+    effort:       MEAL_PROPS.effort,
+  },
+  required: ["title", "source"],
+}
+
+const DINNER_SCHEMA = {
+  type: ["object", "null"],
+  properties: { ...MEAL_PROPS, alternatives: { type: "array", items: ALT_SCHEMA, maxItems: 2 } },
+  required: ["title", "source", "alternatives"],
+}
+
 const WEEK_TOOL = {
   name: "submit_week_plan",
   description: "Submit the full week's meal plan.",
@@ -350,7 +371,7 @@ const WEEK_TOOL = {
           properties: {
             date:       { type: "string" },
             day_note:   { type: "string" },
-            dinner:     MEAL_SCHEMA,
+            dinner:     DINNER_SCHEMA,
             lunch:      MEAL_SCHEMA,
             lunchbox:   MEAL_SCHEMA,
             car_dinner: MEAL_SCHEMA,
@@ -383,15 +404,37 @@ const WEEK_TOOL = {
   },
 }
 
-const SWAP_TOOL = {
+const OPTIONS_TOOL = {
+  name: "submit_options",
+  description: "Submit three different meal options for one slot.",
+  input_schema: {
+    type: "object",
+    properties: {
+      options: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: { type: "object", properties: MEAL_PROPS, required: ["title", "source", "ingredients"] },
+      },
+    },
+    required: ["options"],
+  },
+}
+
+const COMPLETE_TOOL = {
   name: "submit_meal",
-  description: "Submit the single replacement meal.",
+  description: "Submit the full details of the chosen meal.",
   input_schema: { type: "object", properties: MEAL_PROPS, required: ["title", "source"] },
 }
 
 // ── Claude call ───────────────────────────────────────────────────────────────
 
-async function callClaude<T>(user: string, tool: { name: string; description: string; input_schema: object }, maxTokens: number): Promise<T> {
+async function callClaude<T>(
+  user: string,
+  tool: { name: string; description: string; input_schema: object },
+  maxTokens: number,
+  system: string = SYSTEM_PROMPT,
+): Promise<T> {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
@@ -405,7 +448,7 @@ async function callClaude<T>(user: string, tool: { name: string; description: st
     body: JSON.stringify({
       model: MODEL(),
       max_tokens: maxTokens,
-      system: SYSTEM_PROMPT,
+      system,
       tools: [tool],
       tool_choice: { type: "tool", name: tool.name },
       messages: [{ role: "user", content: user }],
@@ -437,6 +480,12 @@ function cleanMeal(raw: PlannedMeal | null | undefined, ctx: PlannerContext): Pl
     extra_for_lunchbox: Boolean(raw.extra_for_lunchbox),
     freeze_portions: raw.freeze_portions && raw.freeze_portions > 0 ? raw.freeze_portions : null,
   }
+  if (raw.alternatives?.length) {
+    meal.alternatives = raw.alternatives
+      .map((a) => cleanAlternative(a, ctx))
+      .filter((a): a is PlannedMeal => a !== null && a.title.toLowerCase() !== meal.title.toLowerCase())
+      .slice(0, 5)
+  }
   if (meal.source === "freezer") {
     let item = ctx.freezer.find((f) => f.id === raw.freezer_item_id)
     if (!item) item = ctx.freezer.find((f) => f.dish.toLowerCase() === meal.title.toLowerCase())
@@ -449,6 +498,15 @@ function cleanMeal(raw: PlannedMeal | null | undefined, ctx: PlannerContext): Pl
     }
   }
   return meal
+}
+
+/** An alternative without ingredients is marked incomplete; details are filled in when it is chosen. */
+function cleanAlternative(raw: PlannedMeal, ctx: PlannerContext): PlannedMeal | null {
+  const alt = cleanMeal({ ...raw, alternatives: undefined }, ctx)
+  if (!alt) return null
+  const needsIngredients = alt.source === "fresh" || alt.source === "cook_morning" || alt.source === "favourite"
+  alt.incomplete = needsIngredients && !(alt.ingredients?.length)
+  return alt
 }
 
 function normaliseDay(raw: Partial<PlanDay> | undefined, date: string, ctx: PlannerContext, locked: LockedMap): PlanDay {
@@ -522,7 +580,37 @@ export async function generatePlan(
   return data as MealPlanRow
 }
 
-export async function swapMeal(
+function planSummaryLines(plan: WeekPlan): string {
+  return plan.days.map((d) => {
+    const bits = (["dinner", "lunch", "lunchbox", "car_dinner"] as SlotKey[])
+      .map((s) => d[s] ? `${s}: ${d[s]!.title}` : null).filter(Boolean)
+    return `${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}: ${bits.join("; ")}`
+  }).join("\n")
+}
+
+async function savePlanDay(
+  supabase: SupabaseClient, planId: string, plan: WeekPlan, date: string, slot: SlotKey, meal: PlannedMeal, kind?: LunchKind,
+): Promise<MealPlanRow> {
+  const days = plan.days.map((d) => {
+    if (d.date !== date) return d
+    if (slot === "lunchbox") return { ...d, lunchbox: { ...meal, kind: kind ?? d.lunchbox?.kind ?? "cold" } }
+    return { ...d, [slot]: meal }
+  })
+  const { data, error } = await supabase
+    .from("meal_plans")
+    .update({ plan: { ...plan, days } })
+    .eq("id", planId)
+    .select("*")
+    .single()
+  if (error) throw new Error(`Could not save the plan: ${error.message}`)
+  return data as MealPlanRow
+}
+
+/**
+ * Three fresh options for one slot. They are stored as the meal's
+ * alternatives (with ingredients, so choosing one is instant).
+ */
+export async function optionsFor(
   supabase: SupabaseClient,
   weekStart: string,
   date: string,
@@ -531,51 +619,79 @@ export async function swapMeal(
 ): Promise<MealPlanRow> {
   const ctx = await loadContext(supabase, weekStart)
   if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
+  const plan    = ctx.existingPlan.plan
+  const day     = plan.days.find((d) => d.date === date)
+  const current = day?.[slot]
+  if (!day || !current) throw new Error("That meal is not in the plan")
 
-  const plan   = ctx.existingPlan.plan
-  const dayIdx = plan.days.findIndex((d) => d.date === date)
-  if (dayIdx < 0) throw new Error("That day is not in this plan")
-  const current = plan.days[dayIdx][slot]
-
-  const planLines = plan.days.map((d) => {
-    const bits = (["dinner", "lunch", "lunchbox", "car_dinner"] as SlotKey[])
-      .map((s) => d[s] ? `${s}: ${d[s]!.title}` : null).filter(Boolean)
-    return `${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}: ${bits.join("; ")}`
-  }).join("\n")
-
+  const avoid = [current.title, ...(current.alternatives ?? []).map((a) => a.title)]
   const extra = [
-    `The current plan for the week is:\n${planLines}`,
-    `Replace only the ${slot.replace("_", " ")} on ${DAY_NAMES[weekdayIndex(date)]} ${date}${current ? ` (currently "${current.title}")` : ""}.`,
-    "Suggest something different from everything else in the week and from the current choice.",
+    `The current plan for the week is:\n${planSummaryLines(plan)}`,
+    `Give 3 different options for the ${slot.replace("_", " ")} on ${DAY_NAMES[weekdayIndex(date)]} ${date}.`,
+    `Do not suggest any of these: ${avoid.join(", ")}. Make the three clearly different from each other and from the rest of the week.`,
+    "Each option must suit that day's time available and follow all the household rules. Include ingredients for each.",
     slot === "lunchbox" ? `This is a ${lunchKindFor(ctx, date).toUpperCase()} lunchbox day.` : "",
     hint ? `The family asked for: ${hint}` : "",
-    "Return the single meal with the submit_meal tool.",
+    "Return them with the submit_options tool.",
   ].filter(Boolean).join("\n")
 
-  const locked = collectLocked(ctx, false)
-  const user   = buildUserPrompt(ctx, locked, extra)
-  const raw    = await callClaude<PlannedMeal>(user, SWAP_TOOL, 2000)
-  const meal   = cleanMeal(raw, ctx)
-  if (!meal) throw new Error("Claude did not return a meal")
+  const user = buildUserPrompt(ctx, collectLocked(ctx, false), extra)
+  const raw  = await callClaude<{ options?: PlannedMeal[] }>(user, OPTIONS_TOOL, 4000)
+  const options = (raw.options ?? [])
+    .map((o) => cleanMeal({ ...o, alternatives: undefined }, ctx))
+    .filter((o): o is PlannedMeal => o !== null)
+  if (!options.length) throw new Error("Claude did not return any options")
 
-  const day = { ...plan.days[dayIdx] }
-  if (slot === "lunchbox") {
-    const kind = lunchKindFor(ctx, date)
-    day.lunchbox = kind === "hot" || kind === "cold" ? { ...meal, kind } : day.lunchbox
-  } else {
-    day[slot] = meal
+  const { alternatives: _old, ...rest } = current
+  void _old
+  return savePlanDay(supabase, ctx.existingPlan.id, plan, date, slot, { ...rest, alternatives: options })
+}
+
+/**
+ * Makes one of the alternatives the chosen meal. The previous choice moves
+ * into the alternatives, so the family can switch back.
+ */
+export async function chooseOption(
+  supabase: SupabaseClient,
+  weekStart: string,
+  date: string,
+  slot: SlotKey,
+  index: number,
+): Promise<MealPlanRow> {
+  const ctx = await loadContext(supabase, weekStart)
+  if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
+  const plan    = ctx.existingPlan.plan
+  const day     = plan.days.find((d) => d.date === date)
+  const current = day?.[slot]
+  const alts    = current?.alternatives ?? []
+  const picked  = alts[index]
+  if (!day || !current || !picked) throw new Error("That option is no longer available")
+
+  let chosen: PlannedMeal = picked
+  if (picked.incomplete) {
+    const extra = [
+      `The current plan for the week is:\n${planSummaryLines(plan)}`,
+      `The family chose "${picked.title}" for the ${slot.replace("_", " ")} on ${DAY_NAMES[weekdayIndex(date)]} ${date}${picked.notes ? ` (${picked.notes})` : ""}.`,
+      "Return exactly this meal, keeping the same title, with full details and ingredients, using the submit_meal tool.",
+    ].join("\n")
+    const user = buildUserPrompt(ctx, collectLocked(ctx, false), extra)
+    const raw  = await callClaude<PlannedMeal>(user, COMPLETE_TOOL, 2000)
+    const full = cleanMeal({ ...raw, title: picked.title, alternatives: undefined }, ctx)
+    if (!full) throw new Error("Claude did not return the meal")
+    chosen = full
   }
-  const days = [...plan.days]
-  days[dayIdx] = day
 
-  const { data, error } = await supabase
-    .from("meal_plans")
-    .update({ plan: { ...plan, days } })
-    .eq("id", ctx.existingPlan.id)
-    .select("*")
-    .single()
-  if (error) throw new Error(`Could not save the plan: ${error.message}`)
-  return data as MealPlanRow
+  // Keep the previous choice's recipe so switching back is instant
+  const { alternatives: _a, ...previous } = current
+  void _a
+  const others = alts.filter((_, i) => i !== index)
+  const next: PlannedMeal = {
+    ...chosen,
+    incomplete: false,
+    locked: current.locked,
+    alternatives: [{ ...previous, incomplete: false }, ...others],
+  }
+  return savePlanDay(supabase, ctx.existingPlan.id, plan, date, slot, next)
 }
 
 /**
@@ -695,4 +811,97 @@ export async function confirmPlan(
   }).eq("id", planRow.id)
 
   return { meals: writes.length, shopping: added, freezer: deductions.reduce((s, d) => s + d.portions, 0) }
+}
+
+// ── Recipe detail (written on demand, cached in the plan) ─────────────────────
+
+const RECIPE_SYSTEM = `You write clear home recipes for a family. Write in UK English with metric quantities.
+Keep the main ingredients and quantities the planner already chose, and add the store-cupboard items (oil, salt, spices and so on) so the list is complete.
+Steps are short, practical and in order, with timings where they help (for example "Simmer for 20 minutes"). 4-10 steps.
+If the meal comes from the freezer, a batch cook or leftovers, give reheating and serving steps instead of a full recipe, plus how long to defrost.
+If it is a car dinner, include how to pack it so it is easy to eat in the car. If it is a hot lunchbox, include how to heat the food flask.
+effort_note is one sentence on what makes it quick or demanding (hands-on time, tricky steps, washing up).
+Return it with the submit_recipe tool.`
+
+const RECIPE_TOOL = {
+  name: "submit_recipe",
+  description: "Submit the full recipe.",
+  input_schema: {
+    type: "object",
+    properties: {
+      serves:       { type: "integer" },
+      prep_minutes: { type: "integer" },
+      cook_minutes: { type: "integer" },
+      effort:       { type: "string", enum: ["easy", "medium", "ambitious"] },
+      effort_note:  { type: "string" },
+      ingredients:  INGREDIENTS_SCHEMA,
+      steps:        { type: "array", items: { type: "string" } },
+      tips:         { type: "array", items: { type: "string" } },
+    },
+    required: ["serves", "ingredients", "steps"],
+  },
+}
+
+export async function getRecipe(
+  supabase: SupabaseClient,
+  weekStart: string,
+  date: string,
+  slot: SlotKey,
+  refresh = false,
+): Promise<RecipeDetail> {
+  const { data: row, error } = await supabase.from("meal_plans").select("*").eq("week_start", weekStart).single()
+  if (error || !row) throw new Error("There is no plan for this week")
+  const plan = (row as MealPlanRow).plan
+  const day  = plan.days.find((d) => d.date === date)
+  const meal = day?.[slot]
+  if (!day || !meal) throw new Error("That meal is not in the plan")
+  if (meal.recipe && !refresh) return meal.recipe
+
+  const { data: members } = await supabase.from("family_members").select("name, is_child, food_dislikes, dietary_needs")
+  const people = (members ?? []) as { name: string; is_child: boolean; food_dislikes: string | null; dietary_needs: string | null }[]
+  const { data: settings } = await supabase.from("meal_planner_settings").select("household_notes").limit(1).maybeSingle()
+
+  const serves =
+    slot === "car_dinner" ? 1
+    : slot === "lunchbox" ? Math.max(1, people.filter((p) => p.is_child).length)
+    : (meal.freezer_portions ?? people.length) || 4
+  const extraServes = slot === "dinner" && meal.extra_for_lunchbox ? people.filter((p) => p.is_child).length : 0
+
+  const lines = [
+    `Meal: ${meal.title}`,
+    `Slot: ${slot.replace("_", " ")}${slot === "lunchbox" && day.lunchbox ? ` (${day.lunchbox.kind})` : ""} on ${DAY_NAMES[weekdayIndex(date)]}`,
+    `Source: ${meal.source ?? "fresh"}`,
+    `Serves: ${serves}${extraServes ? `, plus ${extraServes} extra portions for the next day's lunchboxes` : ""}${meal.freeze_portions ? `, plus ${meal.freeze_portions} portions to freeze (cook double)` : ""}`,
+    meal.cook_minutes ? `Planned time: about ${meal.cook_minutes} minutes, ${meal.effort ?? "easy"}` : "",
+    meal.notes ? `Planner notes: ${meal.notes}` : "",
+    meal.ingredients?.length ? `Ingredients already chosen: ${meal.ingredients.map((i) => (i.qty ? `${i.name} ${i.qty}` : i.name)).join("; ")}` : "",
+    `Dislikes to avoid: ${people.map((p) => p.food_dislikes ? `${p.name}: ${p.food_dislikes}` : null).filter(Boolean).join("; ") || "none"}`,
+    `Dietary needs: ${people.map((p) => p.dietary_needs ? `${p.name}: ${p.dietary_needs}` : null).filter(Boolean).join("; ") || "none"}`,
+    (settings as { household_notes?: string | null } | null)?.household_notes ? `Household notes: ${(settings as { household_notes: string }).household_notes}` : "",
+  ].filter(Boolean).join("\n")
+
+  const raw = await callClaude<Partial<RecipeDetail>>(lines, RECIPE_TOOL, 3000, RECIPE_SYSTEM)
+  const recipe: RecipeDetail = {
+    serves: raw.serves ?? serves,
+    prep_minutes: raw.prep_minutes ?? null,
+    cook_minutes: raw.cook_minutes ?? meal.cook_minutes ?? null,
+    effort: raw.effort ?? meal.effort ?? null,
+    effort_note: raw.effort_note?.trim() || null,
+    ingredients: (raw.ingredients ?? []).filter((i) => i?.name?.trim()),
+    steps: (raw.steps ?? []).filter((s) => s?.trim()),
+    tips: (raw.tips ?? []).filter((t) => t?.trim()),
+  }
+  if (!recipe.steps.length) throw new Error("Claude did not return any steps")
+
+  // Re-read just before writing so edits made meanwhile are not lost
+  const { data: fresh } = await supabase.from("meal_plans").select("id, plan").eq("week_start", weekStart).single()
+  const freshPlan = (fresh as { id: string; plan: WeekPlan } | null)?.plan
+  if (fresh && freshPlan) {
+    const days = freshPlan.days.map((d) => {
+      if (d.date !== date || !d[slot] || d[slot]!.title !== meal.title) return d
+      return { ...d, [slot]: { ...d[slot]!, recipe } } as PlanDay
+    })
+    await supabase.from("meal_plans").update({ plan: { ...freshPlan, days } }).eq("id", (fresh as { id: string }).id)
+  }
+  return recipe
 }

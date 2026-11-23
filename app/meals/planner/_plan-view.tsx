@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   Sparkles, Lock, LockOpen, RefreshCw, Pencil, Check, X, Loader2, Snowflake, Sunrise,
-  ShoppingCart, ChefHat, Car, Soup, BookmarkPlus, CircleCheck, Clock,
+  ShoppingCart, ChefHat, BookmarkPlus, CircleCheck, Clock, BookOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,9 +16,11 @@ import { useRealtimeChannel } from "@/lib/use-realtime"
 import {
   buildShoppingList, shoppingItemLabel, weekdayIndex, addDaysStr,
   SLOT_LABELS, SOURCE_LABELS, LUNCH_KIND_LABELS, SCHOOL_LUNCH_TITLE,
-  type MealPlanRow, type PlanDay, type PlannedMeal, type SlotKey, type WeekPlan, type FreezerItem,
+  type MealPlanRow, type PlanDay, type PlannedMeal, type SlotKey, type WeekPlan, type FreezerItem, type RecipeDetail,
 } from "@/lib/meal-planner"
 import { DAY_FULL, DAY_LABELS, toDateStr } from "../_utils"
+import { RecipeDialog } from "./_recipe-dialog"
+import { SLOT_STYLES } from "../_slot-style"
 
 const PLAN_TABLES = [{ table: "meal_plans" }, { table: "freezer_items" }] as const
 const SLOTS: SlotKey[] = ["dinner", "lunch", "lunchbox", "car_dinner"]
@@ -31,9 +33,10 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
   const [loading, setLoading]     = useState(true)
   const [generating, setGenerating] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const [swapping, setSwapping]   = useState<string | null>(null) // `${date}|${slot}`
+  const [busySlot, setBusySlot]   = useState<string | null>(null) // `${date}|${slot}`
   const [instructions, setInstructions] = useState("")
   const [showShopping, setShowShopping] = useState(false)
+  const [openMeal, setOpenMeal]   = useState<{ date: string; slot: SlotKey } | null>(null)
 
   const fetchData = useCallback(async () => {
     const [planRes, frzRes] = await Promise.all([
@@ -72,21 +75,39 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     }
   }
 
-  async function swap(date: string, slot: SlotKey) {
-    setSwapping(`${date}|${slot}`)
+  async function requestOptions(date: string, slot: SlotKey, hint?: string) {
+    setBusySlot(`${date}|${slot}`)
     try {
-      const res  = await fetch("/api/meal-plan/swap", {
+      const res  = await fetch("/api/meal-plan/options", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ weekStart, date, slot }),
+        body: JSON.stringify({ weekStart, date, slot, hint }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Something went wrong")
       setRow(data.plan)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't swap that meal")
+      toast.error(err instanceof Error ? err.message : "Couldn't get more options")
     } finally {
-      setSwapping(null)
+      setBusySlot(null)
+    }
+  }
+
+  async function chooseOption(date: string, slot: SlotKey, index: number) {
+    setBusySlot(`${date}|${slot}`)
+    try {
+      const res  = await fetch("/api/meal-plan/choose", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekStart, date, slot, index }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Something went wrong")
+      setRow(data.plan)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't choose that option")
+    } finally {
+      setBusySlot(null)
     }
   }
 
@@ -155,10 +176,14 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     toast.success("Batch cook added to the freezer")
   }
 
-  async function saveToRecipes(meal: PlannedMeal) {
-    const notes = meal.ingredients?.length
-      ? `Ingredients: ${meal.ingredients.map((i) => (i.qty ? `${i.name} (${i.qty})` : i.name)).join(", ")}`
-      : meal.notes ?? null
+  async function saveToRecipes(meal: PlannedMeal, recipe: RecipeDetail | null = meal.recipe ?? null) {
+    const ings = recipe?.ingredients?.length ? recipe.ingredients : (meal.ingredients ?? [])
+    const parts: string[] = []
+    if (recipe) parts.push(`Serves ${recipe.serves}. Prep ${recipe.prep_minutes ?? "?"} min, cook ${recipe.cook_minutes ?? "?"} min.`)
+    if (ings.length) parts.push(`Ingredients:\n${ings.map((i) => `- ${i.qty ? `${i.name} (${i.qty})` : i.name}`).join("\n")}`)
+    if (recipe?.steps.length) parts.push(`Method:\n${recipe.steps.map((s, n) => `${n + 1}. ${s}`).join("\n")}`)
+    if (recipe?.tips?.length) parts.push(`Tips:\n${recipe.tips.map((t) => `- ${t}`).join("\n")}`)
+    const notes = parts.length ? parts.join("\n\n") : meal.notes ?? null
     const { error } = await supabase.from("recipes").insert({ title: meal.title, notes, tags: [] })
     if (error) toast.error("Couldn't save the recipe")
     else toast.success(`${meal.title} saved to recipes`)
@@ -235,12 +260,12 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
           </div>
           {plan.summary && <p className="mt-2 text-[15px] leading-snug">{plan.summary}</p>}
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Lock the meals you want to keep, swap the rest, then confirm to fill the Meals page, use freezer portions and add to the shopping list.
+            Click any meal to see the recipe and other options. Lock the ones you want to keep, then confirm to fill the Meals page, use freezer portions and add to the shopping list.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Button variant="outline" className="h-11 rounded-xl bg-card gap-2" onClick={() => setShowShopping((s) => !s)}>
-            <ShoppingCart className="size-4" /> {shopping.length} items
+            <ShoppingCart className="size-4" /> {shopping.length} item{shopping.length === 1 ? "" : "s"}
           </Button>
           <Button variant="outline" className="h-11 rounded-xl bg-card gap-2" onClick={() => generate(true)} disabled={generating || confirming}>
             {generating ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
@@ -305,7 +330,20 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
       )}
 
       {/* ── Days ─────────────────────────────────────────────────────────── */}
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+      {/* Wide screens: rows by meal type so every day lines up */}
+      <div className="hidden xl:block">
+        <PlanGrid
+          plan={plan}
+          todayStr={todayStr}
+          freezer={freezer}
+          busySlot={busySlot}
+          onUpdate={updateMeal}
+          onOpen={(date, slot) => setOpenMeal({ date, slot })}
+        />
+      </div>
+
+      {/* Smaller screens: one card per day */}
+      <div className="grid gap-3 md:grid-cols-2 xl:hidden">
         {plan.days.map((day) => (
           <DayCard
             key={day.date}
@@ -313,13 +351,171 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
             isToday={day.date === todayStr}
             isBatchDay={plan.batch_session?.date === day.date}
             freezer={freezer}
-            swapping={swapping}
-            onSwap={(slot) => swap(day.date, slot)}
+            busySlot={busySlot}
             onUpdate={(slot, patch) => updateMeal(day.date, slot, patch)}
             onFreeze={(meal) => freezeExtra(day.date, meal)}
             onSaveRecipe={saveToRecipes}
+            onOpen={(slot) => setOpenMeal({ date: day.date, slot })}
           />
         ))}
+      </div>
+
+      {openMeal && (() => {
+        const day  = plan.days.find((d) => d.date === openMeal.date)
+        const meal = day?.[openMeal.slot] ?? null
+        return (
+          <RecipeDialog
+            open={Boolean(meal)}
+            onClose={() => setOpenMeal(null)}
+            weekStart={weekStart}
+            date={openMeal.date}
+            slot={openMeal.slot}
+            meal={meal}
+            lunchKind={openMeal.slot === "lunchbox" ? day?.lunchbox?.kind : undefined}
+            busy={busySlot === `${openMeal.date}|${openMeal.slot}`}
+            onChoose={(index) => chooseOption(openMeal.date, openMeal.slot, index)}
+            onMoreOptions={(hint) => requestOptions(openMeal.date, openMeal.slot, hint)}
+            onToggleLock={() => meal && updateMeal(openMeal.date, openMeal.slot, { locked: !meal.locked })}
+            onSaveRecipe={(recipe) => meal && saveToRecipes(meal, recipe)}
+            onFreeze={() => meal && freezeExtra(openMeal.date, meal)}
+          />
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── Wide-screen grid ─────────────────────────────────────────────────────────
+
+function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
+  plan: WeekPlan
+  todayStr: string
+  freezer: FreezerItem[]
+  busySlot: string | null
+  onUpdate: (date: string, slot: SlotKey, patch: Partial<PlannedMeal>) => void
+  onOpen: (date: string, slot: SlotKey) => void
+}) {
+  const rows = SLOTS.filter((slot) => plan.days.some((d) => d[slot]))
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: "120px repeat(7, minmax(0, 1fr))" }}>
+      <div />
+      {plan.days.map((day) => {
+        const idx = weekdayIndex(day.date)
+        const isToday = day.date === todayStr
+        const isBatch = plan.batch_session?.date === day.date
+        return (
+          <div key={day.date} className={cn(
+            "rounded-2xl border px-2.5 py-2 flex flex-col gap-0.5",
+            isToday ? "bg-foreground text-background border-foreground" : "bg-card border-border",
+          )}>
+            <p className="flex items-baseline gap-1.5">
+              <span className="font-display text-[20px] font-semibold leading-none tabular-nums">{Number(day.date.slice(8, 10))}</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.06em]">{DAY_LABELS[idx]}</span>
+              {isBatch && <ChefHat className="size-3.5 ml-auto" aria-label="Batch cook day" />}
+            </p>
+            {day.day_note && (
+              <p className={cn("text-[11.5px] leading-snug line-clamp-3", isToday ? "opacity-80" : "text-muted-foreground")} title={day.day_note}>
+                {day.day_note}
+              </p>
+            )}
+          </div>
+        )
+      })}
+
+      {rows.map((slot) => {
+        const style = SLOT_STYLES[slot]
+        const Icon  = style.icon
+        return (
+          <Fragment key={slot}>
+            <div className="flex items-center gap-2">
+              <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-xl", style.chip)}>
+                <Icon className="size-4" />
+              </span>
+              <span className="text-[13px] font-semibold">{style.label}</span>
+            </div>
+            {plan.days.map((day) => {
+              const meal = day[slot]
+              return (
+                <div key={day.date} className="flex min-w-0">
+                  {meal ? (
+                    <PlanCell
+                      slot={slot}
+                      meal={meal}
+                      lunchKind={slot === "lunchbox" ? day.lunchbox?.kind : undefined}
+                      inFreezer={!meal.freezer_item_id || freezer.some((f) => f.id === meal.freezer_item_id)}
+                      busy={busySlot === `${day.date}|${slot}`}
+                      onUpdate={(patch) => onUpdate(day.date, slot, patch)}
+                      onOpen={() => onOpen(day.date, slot)}
+                    />
+                  ) : (
+                    <div className="flex-1 rounded-2xl bg-secondary/40 min-h-[92px]" aria-hidden="true" />
+                  )}
+                </div>
+              )
+            })}
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
+function PlanCell({ slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: {
+  slot: SlotKey
+  meal: PlannedMeal
+  lunchKind?: string
+  inFreezer: boolean
+  busy: boolean
+  onUpdate: (patch: Partial<PlannedMeal>) => void
+  onOpen: () => void
+}) {
+  const isSchool = slot === "lunchbox" && meal.title === SCHOOL_LUNCH_TITLE
+  const isDinner = slot === "dinner"
+  const style    = SLOT_STYLES[slot]
+  const options  = (meal.alternatives?.length ?? 0) + 1
+
+  if (isSchool) {
+    return (
+      <div className="flex-1 rounded-2xl border border-border bg-secondary/60 text-muted-foreground px-3 py-2.5 min-h-[92px]">
+        <p className="text-[13.5px] font-semibold">School lunch</p>
+        <p className="text-[12px]">No prep</p>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen() } }}
+      title="See recipe and options"
+      className={cn(
+        "group relative flex-1 min-w-0 rounded-2xl border px-3 py-2.5 min-h-[92px] flex flex-col gap-1.5 cursor-pointer transition-colors",
+        style.filled, busy && "opacity-60",
+      )}
+    >
+      <div className="absolute top-1.5 right-1.5 flex items-center">
+        {busy && <Loader2 className="size-3.5 animate-spin mr-1" />}
+        <span onClick={(e) => e.stopPropagation()}>
+          <IconBtn label={meal.locked ? "Unlock" : "Lock"} onPrimary={isDinner} onClick={() => onUpdate({ locked: !meal.locked })}>
+            {meal.locked ? <Lock className="size-3.5" /> : <LockOpen className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />}
+          </IconBtn>
+        </span>
+      </div>
+      <p className="font-semibold text-[13.5px] leading-snug line-clamp-3 pr-7 break-words">{meal.title}</p>
+      <div className="flex flex-wrap gap-1 mt-auto">
+        {slot === "lunchbox" && lunchKind && (
+          <Chip onPrimary={isDinner}>{lunchKind === "hot" ? "Hot" : "Cold"}</Chip>
+        )}
+        {meal.source === "cook_morning" && <Chip onPrimary={isDinner}><Sunrise className="size-3" />Morning</Chip>}
+        {meal.source === "freezer" && <Chip onPrimary={isDinner}><Snowflake className="size-3" />{inFreezer ? "Freezer" : "Not in freezer"}</Chip>}
+        {meal.source === "batch" && <Chip onPrimary={isDinner}><ChefHat className="size-3" />Batch</Chip>}
+        {meal.source === "leftovers" && <Chip onPrimary={isDinner}>Leftovers</Chip>}
+        {meal.cook_minutes ? <Chip onPrimary={isDinner}><Clock className="size-3" />{meal.cook_minutes}m</Chip> : null}
+        {meal.extra_for_lunchbox && <Chip onPrimary={isDinner}>+ lunchbox</Chip>}
+        {meal.freeze_portions ? <Chip onPrimary={isDinner}><Snowflake className="size-3" />×2</Chip> : null}
+        {options > 1 && <Chip onPrimary={isDinner}>{options} options</Chip>}
       </div>
     </div>
   )
@@ -328,17 +524,17 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
 // ── Day card ───────────────────────────────────────────────────────────────────
 
 function DayCard({
-  day, isToday, isBatchDay, freezer, swapping, onSwap, onUpdate, onFreeze, onSaveRecipe,
+  day, isToday, isBatchDay, freezer, busySlot, onUpdate, onFreeze, onSaveRecipe, onOpen,
 }: {
   day: PlanDay
   isToday: boolean
   isBatchDay: boolean
   freezer: FreezerItem[]
-  swapping: string | null
-  onSwap: (slot: SlotKey) => void
+  busySlot: string | null
   onUpdate: (slot: SlotKey, patch: Partial<PlannedMeal>) => void
   onFreeze: (meal: PlannedMeal) => void
   onSaveRecipe: (meal: PlannedMeal) => void
+  onOpen: (slot: SlotKey) => void
 }) {
   const idx = weekdayIndex(day.date)
   const dateNum = Number(day.date.slice(8, 10))
@@ -378,11 +574,11 @@ function DayCard({
             meal={meal}
             lunchKind={slot === "lunchbox" ? day.lunchbox?.kind : undefined}
             freezerItem={meal.freezer_item_id ? freezer.find((f) => f.id === meal.freezer_item_id) : undefined}
-            busy={swapping === `${day.date}|${slot}`}
-            onSwap={() => onSwap(slot)}
+            busy={busySlot === `${day.date}|${slot}`}
             onUpdate={(patch) => onUpdate(slot, patch)}
             onFreeze={() => onFreeze(meal)}
             onSaveRecipe={() => onSaveRecipe(meal)}
+            onOpen={() => onOpen(slot)}
           />
         )
       })}
@@ -393,55 +589,53 @@ function DayCard({
 // ── Meal card ──────────────────────────────────────────────────────────────────
 
 function MealCard({
-  slot, meal, lunchKind, freezerItem, busy, onSwap, onUpdate, onFreeze, onSaveRecipe,
+  slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen,
 }: {
   slot: SlotKey
   meal: PlannedMeal
   lunchKind?: string
   freezerItem?: FreezerItem
   busy: boolean
-  onSwap: () => void
   onUpdate: (patch: Partial<PlannedMeal>) => void
   onFreeze: () => void
   onSaveRecipe: () => void
+  onOpen: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft]     = useState(meal.title)
   const isSchool = slot === "lunchbox" && meal.title === SCHOOL_LUNCH_TITLE
   const isDinner = slot === "dinner"
+  const style    = SLOT_STYLES[slot]
+  const Icon     = style.icon
+  const optionCount = meal.alternatives?.length ?? 0
 
   function saveEdit() {
     const t = draft.trim()
     if (t && t !== meal.title) {
-      // A hand-typed meal: keep it locked, and drop AI ingredients that no longer apply
-      onUpdate({ title: t, locked: true, source: "fresh", ingredients: [], freezer_item_id: null, freezer_portions: null })
+      // A hand-typed meal: keep it locked, and drop AI details that no longer apply
+      onUpdate({ title: t, locked: true, source: "fresh", ingredients: [], freezer_item_id: null, freezer_portions: null, recipe: null })
     }
     setEditing(false)
   }
 
-  const Icon = slot === "car_dinner" ? Car : slot === "dinner" ? Soup : null
-
   return (
-    <div className={cn(
-      "rounded-2xl px-3 py-2.5 flex flex-col gap-1.5",
-      isDinner ? "bg-primary text-primary-foreground" : "bg-background/70 border border-border",
-    )}>
+    <div className={cn("rounded-2xl border px-3 py-2.5 flex flex-col gap-1.5 transition-colors", style.filled, busy && "opacity-60")}>
       <div className="flex items-center gap-1.5">
-        {Icon && <Icon className="size-3.5 opacity-80" />}
-        <span className={cn("text-[11px] font-semibold uppercase tracking-[0.08em]", isDinner ? "opacity-80" : "text-muted-foreground")}>
+        <span className={cn("flex size-6 items-center justify-center rounded-lg", style.badge)}>
+          <Icon className="size-3.5" />
+        </span>
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] opacity-80 truncate">
           {SLOT_LABELS[slot]}
           {slot === "lunchbox" && lunchKind && !isSchool && ` · ${LUNCH_KIND_LABELS[lunchKind as keyof typeof LUNCH_KIND_LABELS]}`}
         </span>
         {!isSchool && (
           <div className="ml-auto flex items-center -mr-1">
+            {busy && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
             <IconBtn label={meal.locked ? "Unlock" : "Lock"} onPrimary={isDinner} onClick={() => onUpdate({ locked: !meal.locked })}>
               {meal.locked ? <Lock className="size-3.5" /> : <LockOpen className="size-3.5" />}
             </IconBtn>
-            <IconBtn label="Edit" onPrimary={isDinner} onClick={() => { setDraft(meal.title); setEditing(true) }}>
+            <IconBtn label="Type your own" onPrimary={isDinner} onClick={() => { setDraft(meal.title); setEditing(true) }}>
               <Pencil className="size-3.5" />
-            </IconBtn>
-            <IconBtn label="Swap" onPrimary={isDinner} onClick={onSwap} disabled={busy || meal.locked}>
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
             </IconBtn>
           </div>
         )}
@@ -459,8 +653,17 @@ function MealCard({
           <IconBtn label="Save" onPrimary={isDinner} onClick={saveEdit}><Check className="size-4" /></IconBtn>
           <IconBtn label="Cancel" onPrimary={isDinner} onClick={() => setEditing(false)}><X className="size-4" /></IconBtn>
         </div>
+      ) : isSchool ? (
+        <p className="font-semibold leading-snug text-[15px]">{meal.title}</p>
       ) : (
-        <p className={cn("font-semibold leading-snug text-[15px] break-words", busy && "opacity-50")}>{meal.title}</p>
+        <button
+          type="button"
+          onClick={onOpen}
+          title="See recipe and options"
+          className="text-left font-semibold leading-snug text-[15px] break-words underline-offset-4 decoration-1 hover:underline"
+        >
+          {meal.title}
+        </button>
       )}
 
       {!isSchool && (
@@ -483,19 +686,22 @@ function MealCard({
       )}
 
       {meal.notes && !isSchool && (
-        <p className={cn("text-[12.5px] leading-snug", isDinner ? "opacity-80" : "text-muted-foreground")}>{meal.notes}</p>
+        <p className="text-[12.5px] leading-snug opacity-80">{meal.notes}</p>
       )}
 
-      {!isSchool && (meal.freeze_portions || (meal.ingredients?.length ?? 0) > 0) && (
+      {!isSchool && (
         <div className="flex flex-wrap gap-1.5 pt-0.5">
+          <SmallAction onPrimary={isDinner} onClick={onOpen}>
+            <BookOpen className="size-3" /> Recipe{optionCount > 0 ? ` · ${optionCount + 1} options` : " · options"}
+          </SmallAction>
           {isDinner && meal.freeze_portions && !meal.frozen_done ? (
             <SmallAction onPrimary={isDinner} onClick={onFreeze}><Snowflake className="size-3" /> Add {meal.freeze_portions} to freezer</SmallAction>
           ) : null}
           {isDinner && meal.frozen_done && (
             <span className="flex items-center gap-1 text-[12px] font-semibold opacity-80"><CircleCheck className="size-3" /> Frozen</span>
           )}
-          {(meal.ingredients?.length ?? 0) > 0 && (
-            <SmallAction onPrimary={isDinner} onClick={onSaveRecipe}><BookmarkPlus className="size-3" /> Save recipe</SmallAction>
+          {meal.recipe && (
+            <SmallAction onPrimary={isDinner} onClick={onSaveRecipe}><BookmarkPlus className="size-3" /> Save</SmallAction>
           )}
         </div>
       )}
@@ -515,7 +721,7 @@ function IconBtn({ children, label, onClick, disabled, onPrimary }: {
       disabled={disabled}
       className={cn(
         "flex size-8 items-center justify-center rounded-lg transition-colors disabled:opacity-40",
-        onPrimary ? "hover:bg-white/15" : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        onPrimary ? "hover:bg-white/15" : "opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10",
       )}
     >
       {children}
@@ -527,7 +733,7 @@ function Chip({ children, onPrimary }: { children: React.ReactNode; onPrimary?: 
   return (
     <span className={cn(
       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium",
-      onPrimary ? "bg-white/15" : "bg-secondary text-secondary-foreground",
+      onPrimary ? "bg-white/15" : "bg-black/5 dark:bg-white/10",
     )}>
       {children}
     </span>
@@ -541,7 +747,7 @@ function SmallAction({ children, onClick, onPrimary }: { children: React.ReactNo
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-semibold transition-colors",
-        onPrimary ? "bg-white/15 hover:bg-white/25" : "bg-secondary hover:bg-secondary/70",
+        onPrimary ? "bg-white/15 hover:bg-white/25" : "bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15",
       )}
     >
       {children}

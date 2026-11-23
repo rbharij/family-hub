@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { ChevronLeft, ChevronRight, Copy, Plus, Sparkles, Car } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, Plus, Sparkles } from "lucide-react"
 import { MemberAvatar } from "@/components/member-avatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -18,6 +18,8 @@ import {
   DAY_LABELS, DAY_FULL,
   type Meal, type MealType, type FamilyMember,
 } from "./_utils"
+import { SLOT_STYLES, type SlotKind } from "./_slot-style"
+import { SCHOOL_LUNCH_TITLE } from "@/lib/meal-planner"
 import { MealEditor } from "./_meal-editor"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
@@ -194,6 +196,26 @@ export default function MealsPage() {
     swipeStartY.current = null
   }
 
+  // ── Rows: one per kind of meal, so every day lines up ─────────────────────
+
+  const weekDates = days.map(toDateStr)
+  const hasCarRow = carDinnerDays.length > 0 || weekDates.some((d) => getCarDinner(d) !== null)
+  const rows: MealRow[] = [
+    { key: "dinner", kind: "dinner", label: "Dinner", member: null, getMeal: getDinner, enabled: () => true },
+    { key: "lunch", kind: "lunch", label: "Lunch", member: null, getMeal: getLunch, enabled: () => true },
+    ...childMembers.map((c): MealRow => ({
+      key: `lunchbox-${c.id}`, kind: "lunchbox", label: c.name, member: c,
+      getMeal: (d) => getLunchbox(d, c.id),
+      enabled: (_d, di) => di < 5 || getLunchbox(_d, c.id) !== null,
+    })),
+    ...(childMembers.length === 0 ? [{ key: "lunchbox", kind: "lunchbox" as const, label: "Lunchbox", member: null, getMeal: () => null, enabled: (_d: string, di: number) => di < 5 }] : []),
+    ...(hasCarRow ? [{
+      key: "car", kind: "car_dinner" as const, label: carMember?.name ?? "Car dinner", member: carMember,
+      getMeal: getCarDinner,
+      enabled: (d: string, di: number) => carDinnerDays.includes(di) || getCarDinner(d) !== null,
+    }] : []),
+  ]
+
   // ── Copy Last Week ─────────────────────────────────────────────────────────
 
   async function handleCopyLastWeek() {
@@ -294,37 +316,20 @@ export default function MealsPage() {
 
       {/* ── Desktop: 7-column grid ──────────────────────────────────────── */}
       <ErrorBoundary label="Meal grid">
-        <div className="hidden lg:grid lg:grid-cols-7 flex-1 min-h-0 gap-2.5 overflow-hidden relative">
-          {loading && (
-            <div className="absolute inset-0 z-10 grid grid-cols-7 gap-2 pointer-events-none">
-              {Array.from({ length: 7 }).map((_, i) => (
-                <div key={i} className="space-y-2 p-2">
-                  <Skeleton className="h-4 w-12 rounded" />
-                  <Skeleton className="h-16 rounded-lg" />
-                  <Skeleton className="h-16 rounded-lg" />
-                </div>
-              ))}
+        <div className="hidden lg:block flex-1 min-h-0 overflow-y-auto relative">
+          {loading ? (
+            <div className="grid gap-2" style={{ gridTemplateColumns: GRID_COLS }}>
+              {Array.from({ length: 8 * 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-2xl" />)}
             </div>
-          )}
-          {days.map((day, di) => (
-            <DayColumn
-              key={di}
-              day={day}
-              dayIdx={di}
-              isToday={toDateStr(day) === toDateStr(today)}
-              dinnerMeal={getDinner(toDateStr(day))}
-              lunchMeal={getLunch(toDateStr(day))}
-              carDinnerMeal={getCarDinner(toDateStr(day))}
-              showCarDinner={carDinnerDays.includes(di)}
-              carMember={carMember}
-              childMembers={childMembers}
-              getLunchbox={(memberId) => getLunchbox(toDateStr(day), memberId)}
-              onSlotClick={(type, meal, forMemberId, forMemberName) =>
-                openEditor(toDateStr(day), di, type, meal, forMemberId, forMemberName)
-              }
-              dayPlants={dayPlantMap.get(toDateStr(day))}
+          ) : (
+            <WeekGrid
+              days={days}
+              today={today}
+              rows={rows}
+              dayPlantMap={dayPlantMap}
+              onSlotClick={openEditor}
             />
-          ))}
+          )}
         </div>
 
         {/* ── Mobile: single-day view ─────────────────────────────────────── */}
@@ -332,9 +337,7 @@ export default function MealsPage() {
           <div className="flex gap-1 overflow-x-auto pb-1 shrink-0">
             {days.map((day, di) => {
               const isToday    = toDateStr(day) === toDateStr(today)
-              const hasDinner  = getDinner(toDateStr(day)) !== null
-              const hasLunch   = childMembers.some((c) => getLunchbox(toDateStr(day), c.id) !== null)
-              const dotCount   = (hasDinner ? 1 : 0) + (hasLunch ? 1 : 0)
+              const dotCount   = rows.filter((r) => r.getMeal(toDateStr(day)) !== null).length
               return (
                 <button
                   key={di}
@@ -351,7 +354,7 @@ export default function MealsPage() {
                   <span className="text-sm font-medium">{DAY_LABELS[di]}</span>
                   <span className="font-display text-xl font-semibold leading-tight">{day.getDate()}</span>
                   <div className="flex gap-0.5 mt-0.5 h-1">
-                    {Array.from({ length: dotCount }).map((_, i) => (
+                    {Array.from({ length: Math.min(dotCount, 5) }).map((_, i) => (
                       <span
                         key={i}
                         className={cn(
@@ -371,22 +374,13 @@ export default function MealsPage() {
             onTouchStart={mobileSwipeStart}
             onTouchEnd={mobileSwipeEnd}
           >
-            <DayColumn
+            <DayList
               day={days[mobileDay]}
               dayIdx={mobileDay}
               isToday={toDateStr(days[mobileDay]) === toDateStr(today)}
-              dinnerMeal={getDinner(toDateStr(days[mobileDay]))}
-              lunchMeal={getLunch(toDateStr(days[mobileDay]))}
-              carDinnerMeal={getCarDinner(toDateStr(days[mobileDay]))}
-              showCarDinner={carDinnerDays.includes(mobileDay)}
-              carMember={carMember}
-              childMembers={childMembers}
-              getLunchbox={(memberId) => getLunchbox(toDateStr(days[mobileDay]), memberId)}
-              onSlotClick={(type, meal, forMemberId, forMemberName) =>
-                openEditor(toDateStr(days[mobileDay]), mobileDay, type, meal, forMemberId, forMemberName)
-              }
+              rows={rows}
               dayPlants={dayPlantMap.get(toDateStr(days[mobileDay]))}
-              mobile
+              onSlotClick={openEditor}
             />
           </div>
         </div>
@@ -447,167 +441,203 @@ function SummaryPill({ count, total, label, loading }: {
   )
 }
 
-// ── Day column ─────────────────────────────────────────────────────────────────
+// ── Rows and slots ─────────────────────────────────────────────────────────────
 
-function DayColumn({
-  day, dayIdx, isToday,
-  dinnerMeal, lunchMeal, carDinnerMeal, showCarDinner, carMember,
-  childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
-}: {
-  day: Date
-  dayIdx: number
-  isToday: boolean
-  dinnerMeal: Meal | null
-  lunchMeal: Meal | null
-  carDinnerMeal: Meal | null
-  showCarDinner: boolean
-  carMember: FamilyMember | null
-  childMembers: FamilyMember[]
-  getLunchbox: (memberId: string) => Meal | null
-  onSlotClick: (type: MealType, meal: Meal | null, forMemberId: string | null, forMemberName: string | null) => void
-  dayPlants?: { count: number; plants: { name: string; emoji: string | null }[] }
-  mobile?: boolean
+const GRID_COLS = "132px repeat(7, minmax(0, 1fr))"
+
+interface MealRow {
+  key: string
+  kind: SlotKind
+  label: string
+  member: FamilyMember | null
+  getMeal: (date: string) => Meal | null
+  /** Whether this row applies on a given day (e.g. car dinners only on class days) */
+  enabled: (date: string, dayIdx: number) => boolean
+}
+
+type OpenEditor = (
+  date: string, dayIdx: number, type: MealType, meal: Meal | null,
+  forMemberId?: string | null, forMemberName?: string | null,
+) => void
+
+function openRow(row: MealRow, date: string, di: number, onSlotClick: OpenEditor) {
+  onSlotClick(date, di, row.kind, row.getMeal(date), row.member?.id ?? null, row.member?.name ?? null)
+}
+
+// ── Desktop week grid ──────────────────────────────────────────────────────────
+
+function WeekGrid({ days, today, rows, dayPlantMap, onSlotClick }: {
+  days: Date[]
+  today: Date
+  rows: MealRow[]
+  dayPlantMap: Map<string, { count: number; plants: { name: string; emoji: string | null }[] }>
+  onSlotClick: OpenEditor
 }) {
+  const todayStr = toDateStr(today)
   return (
-    <div className={cn(
-      "flex flex-col gap-2 rounded-[24px] border p-2 min-w-0",
-      isToday ? "bg-accent/60 border-primary/30" : "bg-card border-border",
-      mobile ? "min-h-[280px] p-3 gap-3" : "h-full overflow-y-auto",
-    )}>
-      {/* Day header */}
-      <div className="shrink-0 flex items-center gap-2 px-1.5 pt-1">
-        <span className={cn(
-          "flex flex-col items-center justify-center rounded-xl px-2.5 py-1 min-w-[44px]",
-          isToday ? "bg-foreground text-background" : "bg-secondary text-foreground",
-        )}>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.06em]">{DAY_LABELS[dayIdx]}</span>
-          <span className="font-display text-[19px] font-semibold leading-none">{day.getDate()}</span>
-        </span>
-        <div className="min-w-0">
-          {mobile && <p className="font-display text-[19px] font-semibold leading-tight">{DAY_FULL[dayIdx]}</p>}
-          {isToday && !mobile && <p className="text-[12px] font-semibold uppercase tracking-[0.06em] text-primary">Today</p>}
-          {dayPlants && dayPlants.count > 0 && (
-            <p className="text-[12px] font-semibold text-accent-foreground">
-              {dayPlants.count} plant{dayPlants.count !== 1 ? "s" : ""}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <MealSlot label="Dinner" meal={dinnerMeal} mobile={mobile} highlight
-        onClick={() => onSlotClick("dinner", dinnerMeal, null, null)} />
-
-      <MealSlot label="Lunch" meal={lunchMeal} mobile={mobile}
-        onClick={() => onSlotClick("lunch", lunchMeal, null, null)} />
-
-      {childMembers.map((child) => {
-        const meal = getLunchbox(child.id)
+    <div className="grid gap-x-2 gap-y-2 pb-2" style={{ gridTemplateColumns: GRID_COLS }}>
+      {/* Header row */}
+      <div />
+      {days.map((day, di) => {
+        const ds = toDateStr(day)
+        const isToday = ds === todayStr
+        const plants = dayPlantMap.get(ds)
         return (
-          <LunchboxSlot key={child.id} child={child} meal={meal} mobile={mobile}
-            onClick={() => onSlotClick("lunchbox", meal, child.id, child.name)} />
+          <div key={ds} className={cn(
+            "sticky top-0 z-10 flex items-center gap-2 rounded-2xl px-2.5 py-2 border",
+            isToday ? "bg-foreground text-background border-foreground" : "bg-card border-border",
+          )}>
+            <span className="font-display text-[22px] font-semibold leading-none tabular-nums">{day.getDate()}</span>
+            <div className="min-w-0 leading-tight">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.06em]">{DAY_LABELS[di]}{isToday ? " · Today" : ""}</p>
+              {plants && plants.count > 0 && (
+                <p className={cn("text-[11.5px] font-medium", isToday ? "opacity-80" : "text-muted-foreground")}>
+                  {plants.count} plant{plants.count !== 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
+          </div>
         )
       })}
 
-      {(carDinnerMeal || showCarDinner) && (
-        <SlotShell filled={Boolean(carDinnerMeal)} mobile={mobile}
-          onClick={() => onSlotClick("car_dinner", carDinnerMeal, carMember?.id ?? carDinnerMeal?.for_member_id ?? null, carMember?.name ?? null)}>
-          <span className="flex items-center gap-1.5 min-w-0">
-            <Car className="size-3.5 text-muted-foreground" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">
-              Car dinner{carMember ? ` · ${carMember.name}` : ""}
+      {/* Meal rows */}
+      {rows.map((row) => (
+        <Row key={row.key} row={row} days={days} todayStr={todayStr} onSlotClick={onSlotClick} />
+      ))}
+    </div>
+  )
+}
+
+function Row({ row, days, todayStr, onSlotClick }: {
+  row: MealRow; days: Date[]; todayStr: string; onSlotClick: OpenEditor
+}) {
+  const style = SLOT_STYLES[row.kind]
+  const Icon  = style.icon
+  return (
+    <>
+      <div className="flex items-center gap-2 pr-1 min-w-0">
+        {row.member ? (
+          <span className="relative shrink-0">
+            <MemberAvatar member={row.member} className="size-8 text-[14px]" />
+            <span className={cn("absolute -bottom-1 -right-1 flex size-[18px] items-center justify-center rounded-full ring-2 ring-background", style.chip)}>
+              <Icon className="size-2.5" />
             </span>
           </span>
-          {carDinnerMeal ? <MealText meal={carDinnerMeal} mobile={mobile} /> : <AddHint mobile={mobile} />}
-        </SlotShell>
-      )}
+        ) : (
+          <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-xl", style.chip)}>
+            <Icon className="size-4" />
+          </span>
+        )}
+        <div className="min-w-0 leading-tight">
+          <p className="text-[13px] font-semibold truncate">{row.kind === "lunchbox" || row.kind === "car_dinner" ? style.label : row.label}</p>
+          {row.member && <p className="text-[12px] text-muted-foreground truncate">{row.member.name}</p>}
+        </div>
+      </div>
+      {days.map((day, di) => {
+        const ds = toDateStr(day)
+        return (
+          <div key={ds} className={cn("min-w-0 flex", ds === todayStr && row.enabled(ds, di) && "rounded-2xl ring-2 ring-primary/25")}>
+            {row.enabled(ds, di) ? (
+              <SlotCard kind={row.kind} meal={row.getMeal(ds)} onClick={() => openRow(row, ds, di, onSlotClick)} />
+            ) : (
+              <div className="flex-1 rounded-2xl bg-secondary/40 min-h-[84px]" aria-hidden="true" />
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
-      {childMembers.length === 0 && (
-        <MealSlot label="Lunchbox" meal={null} mobile={mobile}
-          onClick={() => onSlotClick("lunchbox", null, null, null)} />
-      )}
+// ── Mobile day list ────────────────────────────────────────────────────────────
+
+function DayList({ day, dayIdx, isToday, rows, dayPlants, onSlotClick }: {
+  day: Date
+  dayIdx: number
+  isToday: boolean
+  rows: MealRow[]
+  dayPlants?: { count: number; plants: { name: string; emoji: string | null }[] }
+  onSlotClick: OpenEditor
+}) {
+  const ds = toDateStr(day)
+  return (
+    <div className={cn(
+      "flex flex-col gap-2.5 rounded-[24px] border p-3",
+      isToday ? "bg-accent/60 border-primary/30" : "bg-card border-border",
+    )}>
+      <div className="flex items-baseline gap-2 px-1">
+        <p className="font-display text-[20px] font-semibold">{DAY_FULL[dayIdx]}</p>
+        {isToday && <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-primary">Today</span>}
+        {dayPlants && dayPlants.count > 0 && (
+          <span className="ml-auto text-[13px] font-semibold text-accent-foreground">{dayPlants.count} plants</span>
+        )}
+      </div>
+      {rows.filter((r) => r.enabled(ds, dayIdx)).map((row) => (
+        <SlotCard
+          key={row.key}
+          kind={row.kind}
+          meal={row.getMeal(ds)}
+          member={row.member}
+          showLabel
+          mobile
+          onClick={() => openRow(row, ds, dayIdx, onSlotClick)}
+        />
+      ))}
     </div>
   )
 }
 
-// ── Slot shell ──────────────────────────────────────────────────────────────────
+// ── Slot card (shared) ─────────────────────────────────────────────────────────
 
-function SlotShell({ filled, mobile, onClick, children, highlight = false }: {
-  filled: boolean; mobile: boolean; onClick: () => void; children: React.ReactNode; highlight?: boolean
+function SlotCard({ kind, meal, member = null, showLabel = false, mobile = false, onClick }: {
+  kind: SlotKind
+  meal: Meal | null
+  member?: FamilyMember | null
+  showLabel?: boolean
+  mobile?: boolean
+  onClick: () => void
 }) {
+  const style    = SLOT_STYLES[kind]
+  const Icon     = style.icon
+  const isSchool = kind === "lunchbox" && meal?.title === SCHOOL_LUNCH_TITLE
+
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
-        "group flex flex-col items-start gap-1 w-full text-left rounded-2xl transition-colors min-w-0",
-        mobile ? "px-4 py-3.5 min-h-[84px]" : "px-2.5 py-2.5 flex-1 min-h-[76px]",
-        filled
-          ? highlight
-            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-            : "bg-background/70 border border-border hover:border-primary/40"
-          : "border-[1.5px] border-dashed border-input hover:bg-secondary/60",
+        "group flex-1 flex flex-col items-start gap-1 w-full text-left rounded-2xl border transition-colors min-w-0",
+        mobile ? "px-4 py-3 min-h-[76px]" : "px-3 py-2.5 min-h-[84px]",
+        !meal
+          ? cn("border-[1.5px] border-dashed bg-transparent", style.empty)
+          : isSchool
+          ? "bg-secondary/60 border-border text-muted-foreground hover:border-input"
+          : style.filled,
       )}
     >
-      {children}
-    </button>
-  )
-}
-
-function MealText({ meal, mobile, onPrimary = false }: { meal: Meal; mobile: boolean; onPrimary?: boolean }) {
-  return (
-    <div className="min-w-0 w-full">
-      <p className={cn("font-semibold leading-snug break-words", mobile ? "text-[17px]" : "text-[14px]")}>{meal.title}</p>
-      {meal.notes && (
-        <p className={cn(
-          "leading-snug mt-0.5 line-clamp-2",
-          onPrimary ? "opacity-80" : "text-muted-foreground",
-          mobile ? "text-[15px]" : "text-[12px]",
-        )}>
-          {meal.notes}
-        </p>
+      {(showLabel || !meal) && (
+        <span className="flex items-center gap-1.5 min-w-0 text-[11px] font-semibold uppercase tracking-[0.08em] opacity-80">
+          {member && showLabel ? <MemberAvatar member={member} className="size-5 text-[10px]" /> : <Icon className="size-3.5" />}
+          <span className="truncate">{showLabel ? `${style.label}${member ? ` · ${member.name}` : ""}` : "Add"}</span>
+          {member && showLabel && <Icon className="size-3.5" />}
+        </span>
       )}
-    </div>
-  )
-}
-
-function AddHint({ mobile }: { mobile: boolean }) {
-  return (
-    <span className={cn("flex items-center gap-1 text-muted-foreground font-medium", mobile ? "text-[15px]" : "text-[13px]")}>
-      <Plus className="size-3.5" /> Add
-    </span>
-  )
-}
-
-// ── Dinner / lunch slot ─────────────────────────────────────────────────────────
-
-function MealSlot({ label, meal, mobile, onClick, highlight = false }: {
-  label: string; meal: Meal | null; mobile: boolean; onClick: () => void; highlight?: boolean
-}) {
-  const onPrimary = Boolean(meal) && highlight
-  return (
-    <SlotShell filled={Boolean(meal)} mobile={mobile} onClick={onClick} highlight={highlight}>
-      <span className={cn(
-        "text-[11px] font-semibold uppercase tracking-[0.08em]",
-        onPrimary ? "opacity-80" : "text-muted-foreground",
-      )}>
-        {label}
-      </span>
-      {meal ? <MealText meal={meal} mobile={mobile} onPrimary={onPrimary} /> : <AddHint mobile={mobile} />}
-    </SlotShell>
-  )
-}
-
-// ── Per-child lunchbox slot ────────────────────────────────────────────────────
-
-function LunchboxSlot({ child, meal, mobile, onClick }: {
-  child: FamilyMember; meal: Meal | null; mobile: boolean; onClick: () => void
-}) {
-  return (
-    <SlotShell filled={Boolean(meal)} mobile={mobile} onClick={onClick}>
-      <span className="flex items-center gap-1.5 min-w-0">
-        <MemberAvatar member={child} className="size-5 text-[11px]" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">{child.name}</span>
-      </span>
-      {meal ? <MealText meal={meal} mobile={mobile} /> : <AddHint mobile={mobile} />}
-    </SlotShell>
+      {meal && (
+        <div className="min-w-0 w-full">
+          <p className={cn("font-semibold leading-snug line-clamp-2 break-words", mobile ? "text-[16px]" : "text-[13.5px]")}>
+            {isSchool ? "School lunch" : meal.title}
+          </p>
+          {meal.notes && !isSchool && (
+            <p className={cn("leading-snug mt-0.5 line-clamp-1 opacity-75", mobile ? "text-[14px]" : "text-[12px]")}>{meal.notes}</p>
+          )}
+        </div>
+      )}
+      {!meal && !showLabel && null}
+      {!meal && showLabel && (
+        <span className={cn("flex items-center gap-1 font-medium", mobile ? "text-[15px]" : "text-[13px]")}>
+          <Plus className="size-3.5" /> Add
+        </span>
+      )}
+    </button>
   )
 }

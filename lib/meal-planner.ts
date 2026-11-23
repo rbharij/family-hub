@@ -36,6 +36,25 @@ export interface PlannedMeal {
   locked?: boolean
   /** Set after "Add to freezer" has been pressed for freeze_portions */
   frozen_done?: boolean
+  /** Full recipe, written on demand when the meal is opened (cached here) */
+  recipe?: RecipeDetail | null
+  /** Other options for this slot; the family can pick one instead */
+  alternatives?: PlannedMeal[]
+  /** An alternative whose ingredients still need filling in when chosen */
+  incomplete?: boolean
+}
+
+export interface RecipeDetail {
+  serves: number
+  prep_minutes: number | null
+  cook_minutes: number | null
+  effort: Effort | null
+  /** Every ingredient, including store-cupboard items */
+  ingredients: Ingredient[]
+  steps: string[]
+  tips?: string[]
+  /** Short summary of what makes it easy or hard */
+  effort_note?: string | null
 }
 
 export interface PlannedLunchbox extends PlannedMeal {
