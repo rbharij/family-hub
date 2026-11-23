@@ -347,6 +347,15 @@ export function MealEditor({
                 }
                 autoFocus={mealType !== "lunchbox"}
               />
+              {(isDinner || isLunch) && (
+                <button
+                  type="button"
+                  onClick={() => setTitle("Eating out")}
+                  className="inline-flex items-center rounded-full border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary"
+                >
+                  Eating out
+                </button>
+              )}
             </div>
           )}
 

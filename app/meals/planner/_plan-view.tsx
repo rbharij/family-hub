@@ -15,7 +15,7 @@ import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import {
   buildShoppingList, shoppingItemLabel, weekdayIndex, addDaysStr, weekBalance, linkDinnerFlags, sourceDinnerDate,
-  PROTEIN_LABELS, MEAT_FREE, type Protein, type PlannerSettings,
+  PROTEIN_LABELS, MEAT_FREE, SKIPPED_LABELS, isSkipped, type Protein, type PlannerSettings,
   SLOT_LABELS, SOURCE_LABELS, LUNCH_KIND_LABELS, SCHOOL_LUNCH_TITLE,
   type MealPlanRow, type PlanDay, type PlannedMeal, type SlotKey, type WeekPlan, type FreezerItem, type RecipeDetail,
 } from "@/lib/meal-planner"
@@ -165,6 +165,27 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     const saved = await savePlan({ ...plan, days })
     // A dinner typed in by hand: bring its lunchbox / car dinner into line
     if (saved && slot === "dinner" && titleChanged) syncLinked(date)
+  }
+
+  async function setSkip(date: string, slot: SlotKey, skip: boolean) {
+    setBusySlot(`${date}|${slot}`)
+    try {
+      const res  = await fetch("/api/meal-plan/skip", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekStart, date, slot, skip }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Something went wrong")
+      setRow(data.plan)
+      if (skip) setOpenMeal(null)
+      const label = skip ? `${SLOT_LABELS[slot]} cleared` : `${SLOT_LABELS[slot]} put back`
+      toast.success(data.changed?.length ? `${label}. Also updated: ${data.changed.join(", ")}` : label)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't change that meal")
+    } finally {
+      setBusySlot(null)
+    }
   }
 
   async function syncLinked(date: string) {
@@ -396,6 +417,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
           busySlot={busySlot}
           onUpdate={updateMeal}
           onOpen={(date, slot) => setOpenMeal({ date, slot })}
+          onSkip={setSkip}
         />
       </div>
 
@@ -413,6 +435,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
             onFreeze={(meal) => freezeExtra(day.date, meal)}
             onSaveRecipe={saveToRecipes}
             onOpen={(slot) => setOpenMeal({ date: day.date, slot })}
+            onSkip={(slot, skip) => setSkip(day.date, slot, skip)}
           />
         ))}
       </div>
@@ -435,6 +458,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
             onToggleLock={() => meal && updateMeal(openMeal.date, openMeal.slot, { locked: !meal.locked })}
             onSaveRecipe={(recipe) => meal && saveToRecipes(meal, recipe)}
             onFreeze={() => meal && freezeExtra(openMeal.date, meal)}
+            onClear={() => setSkip(openMeal.date, openMeal.slot, true)}
           />
         )
       })()}
@@ -444,15 +468,16 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
 
 // ── Wide-screen grid ─────────────────────────────────────────────────────────
 
-function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
+function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen, onSkip }: {
   plan: WeekPlan
   todayStr: string
   freezer: FreezerItem[]
   busySlot: string | null
   onUpdate: (date: string, slot: SlotKey, patch: Partial<PlannedMeal>) => void
   onOpen: (date: string, slot: SlotKey) => void
+  onSkip: (date: string, slot: SlotKey, skip: boolean) => void
 }) {
-  const rows = SLOTS.filter((slot) => plan.days.some((d) => d[slot]))
+  const rows = SLOTS.filter((slot) => plan.days.some((d) => d[slot] || isSkipped(d, slot)))
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: "120px repeat(7, minmax(0, 1fr))" }}>
       <div />
@@ -494,7 +519,13 @@ function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
               const meal = day[slot]
               return (
                 <div key={day.date} className="flex min-w-0">
-                  {meal ? (
+                  {isSkipped(day, slot) ? (
+                    <SkippedCell
+                      slot={slot}
+                      busy={busySlot === `${day.date}|${slot}`}
+                      onRestore={() => onSkip(day.date, slot, false)}
+                    />
+                  ) : meal ? (
                     <PlanCell
                       date={day.date}
                       slot={slot}
@@ -504,6 +535,7 @@ function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
                       busy={busySlot === `${day.date}|${slot}`}
                       onUpdate={(patch) => onUpdate(day.date, slot, patch)}
                       onOpen={() => onOpen(day.date, slot)}
+                      onSkip={() => onSkip(day.date, slot, true)}
                     />
                   ) : (
                     <div className="flex-1 rounded-2xl bg-secondary/40 min-h-[92px]" aria-hidden="true" />
@@ -518,7 +550,7 @@ function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
   )
 }
 
-function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: {
+function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen, onSkip }: {
   date: string
   slot: SlotKey
   meal: PlannedMeal
@@ -527,6 +559,7 @@ function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOp
   busy: boolean
   onUpdate: (patch: Partial<PlannedMeal>) => void
   onOpen: () => void
+  onSkip: () => void
 }) {
   const isSchool = slot === "lunchbox" && meal.title === SCHOOL_LUNCH_TITLE
   const isDinner = slot === "dinner"
@@ -555,15 +588,18 @@ function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOp
         style.filled, busy && "opacity-60",
       )}
     >
-      <div className="absolute top-1.5 right-1.5 flex items-center">
-        {busy && <Loader2 className="size-3.5 animate-spin mr-1" />}
-        <span onClick={(e) => e.stopPropagation()}>
+      <div className="absolute top-1 right-1 flex flex-col items-center">
+        {busy && <Loader2 className="size-3.5 animate-spin m-1" />}
+        <span onClick={(e) => e.stopPropagation()} className="flex flex-col items-center">
+          <IconBtn label={`Clear (${SKIPPED_LABELS[slot].toLowerCase()})`} onPrimary={isDinner} onClick={onSkip} disabled={busy}>
+            <X className="size-3.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity" />
+          </IconBtn>
           <IconBtn label={meal.locked ? "Unlock" : "Lock"} onPrimary={isDinner} onClick={() => onUpdate({ locked: !meal.locked })}>
             {meal.locked ? <Lock className="size-3.5" /> : <LockOpen className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />}
           </IconBtn>
         </span>
       </div>
-      <p className="font-semibold text-[13.5px] leading-snug line-clamp-3 pr-7 break-words">{meal.title}</p>
+      <p className="font-semibold text-[13.5px] leading-snug line-clamp-3 pr-6 break-words hyphens-auto">{meal.title}</p>
       <div className="flex flex-wrap gap-1 mt-auto">
         {slot === "dinner" && meal.protein && <ProteinChip protein={meal.protein} small onPrimary />}
         {linkedFrom && <Chip onPrimary={isDinner}><CornerDownRight className="size-3" />{linkedFrom}</Chip>}
@@ -584,10 +620,35 @@ function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOp
   )
 }
 
+function SkippedCell({ slot, busy, onRestore, mobile = false }: {
+  slot: SlotKey; busy: boolean; onRestore: () => void; mobile?: boolean
+}) {
+  const Icon = SLOT_STYLES[slot].icon
+  return (
+    <div className={cn(
+      "flex-1 rounded-2xl border-[1.5px] border-dashed border-input bg-transparent px-3 py-2.5 flex flex-col gap-1.5 text-muted-foreground",
+      mobile ? "min-h-[64px]" : "min-h-[92px]",
+    )}>
+      <p className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+        <Icon className="size-3.5" /> {SKIPPED_LABELS[slot]}
+      </p>
+      <button
+        type="button"
+        onClick={onRestore}
+        disabled={busy}
+        className="mt-auto self-start inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-semibold bg-secondary hover:bg-secondary/70 text-foreground disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+        Put back
+      </button>
+    </div>
+  )
+}
+
 // ── Day card ───────────────────────────────────────────────────────────────────
 
 function DayCard({
-  day, isToday, isBatchDay, freezer, busySlot, onUpdate, onFreeze, onSaveRecipe, onOpen,
+  day, isToday, isBatchDay, freezer, busySlot, onUpdate, onFreeze, onSaveRecipe, onOpen, onSkip,
 }: {
   day: PlanDay
   isToday: boolean
@@ -598,6 +659,7 @@ function DayCard({
   onFreeze: (meal: PlannedMeal) => void
   onSaveRecipe: (meal: PlannedMeal) => void
   onOpen: (slot: SlotKey) => void
+  onSkip: (slot: SlotKey, skip: boolean) => void
 }) {
   const idx = weekdayIndex(day.date)
   const dateNum = Number(day.date.slice(8, 10))
@@ -629,6 +691,17 @@ function DayCard({
 
       {SLOTS.map((slot) => {
         const meal = day[slot]
+        if (isSkipped(day, slot)) {
+          return (
+            <SkippedCell
+              key={slot}
+              slot={slot}
+              mobile
+              busy={busySlot === `${day.date}|${slot}`}
+              onRestore={() => onSkip(slot, false)}
+            />
+          )
+        }
         if (!meal) return null
         return (
           <MealCard
@@ -643,6 +716,7 @@ function DayCard({
             onFreeze={() => onFreeze(meal)}
             onSaveRecipe={() => onSaveRecipe(meal)}
             onOpen={() => onOpen(slot)}
+            onSkip={() => onSkip(slot, true)}
           />
         )
       })}
@@ -653,7 +727,7 @@ function DayCard({
 // ── Meal card ──────────────────────────────────────────────────────────────────
 
 function MealCard({
-  date, slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen,
+  date, slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen, onSkip,
 }: {
   date: string
   slot: SlotKey
@@ -665,6 +739,7 @@ function MealCard({
   onFreeze: () => void
   onSaveRecipe: () => void
   onOpen: () => void
+  onSkip: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft]     = useState(meal.title)
@@ -701,6 +776,9 @@ function MealCard({
             </IconBtn>
             <IconBtn label="Type your own" onPrimary={isDinner} onClick={() => { setDraft(meal.title); setEditing(true) }}>
               <Pencil className="size-3.5" />
+            </IconBtn>
+            <IconBtn label={`Clear (${SKIPPED_LABELS[slot].toLowerCase()})`} onPrimary={isDinner} onClick={onSkip} disabled={busy}>
+              <X className="size-3.5" />
             </IconBtn>
           </div>
         )}

@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   addDaysStr, weekDates, weekdayIndex, daysBetween, buildShoppingList, shoppingItemLabel,
   SCHOOL_LUNCH_TITLE, FREEZER_OLD_DAYS, DEFAULT_VEG_DINNERS, DEFAULT_MAX_SAME_PROTEIN, PROTEINS,
-  linkDinnerFlags, dependentsOf,
+  linkDinnerFlags, dependentsOf, EATING_OUT_TITLE,
   type WeekPlan, type PlanDay, type PlannedMeal, type PlannedLunchbox, type PlannerSettings, type RecipeDetail,
   type FreezerItem, type MealPlanRow, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
@@ -255,6 +255,10 @@ function describeDay(ctx: PlannerContext, date: string, locked: LockedMap): stri
   for (const slot of ["dinner", "lunch", "lunchbox", "car_dinner"] as SlotKey[]) {
     const m = locked.get(`${date}|${slot}`)
     if (m) lines.push(`  LOCKED ${slot}: ${m.title} (keep exactly as is)`)
+  }
+  const skipped = ctx.existingPlan?.plan.days.find((d) => d.date === date)?.skipped ?? []
+  for (const slot of skipped) {
+    lines.push(`  NOT NEEDED ${slot}${slot === "dinner" || slot === "lunch" ? " (eating out)" : ""}: set it to null, and do not plan leftovers from it`)
   }
   return lines.join("\n")
 }
@@ -533,6 +537,7 @@ function cleanAlternative(raw: PlannedMeal, ctx: PlannerContext): PlannedMeal | 
 }
 
 function normaliseDay(raw: Partial<PlanDay> | undefined, date: string, ctx: PlannerContext, locked: LockedMap): PlanDay {
+  const prev = ctx.existingPlan?.plan.days.find((d) => d.date === date)
   const lk = lunchKindFor(ctx, date)
 
   let lunchbox: PlannedLunchbox | null = null
@@ -557,6 +562,12 @@ function normaliseDay(raw: Partial<PlanDay> | undefined, date: string, ctx: Plan
     if (!m) continue
     if (slot === "lunchbox") day.lunchbox = { ...(m as PlannedLunchbox), locked: true }
     else day[slot] = { ...m, locked: true }
+  }
+  // Cleared slots stay cleared through replans
+  if (prev?.skipped?.length) {
+    day.skipped = [...prev.skipped]
+    day.skipped_meals = prev.skipped_meals
+    for (const slot of prev.skipped) day[slot] = null
   }
   return day
 }
@@ -642,11 +653,13 @@ const SYNC_TOOL = {
  * they stay in step. Returns the updated plan and a list of what changed.
  */
 async function syncDependents(
-  ctx: PlannerContext, plan: WeekPlan, dinnerDate: string,
+  ctx: PlannerContext, plan: WeekPlan, dinnerDate: string, mode: "changed" | "skipped" | "restored" = "changed",
+  /** For "skipped": the plan before the dinner was cleared, to find what relied on it */
+  before?: WeekPlan,
 ): Promise<{ plan: WeekPlan; changed: string[] }> {
-  const deps   = dependentsOf(linkDinnerFlags(plan), dinnerDate)
+  const deps   = mode === "restored" ? candidatesFor(plan, dinnerDate) : dependentsOf(linkDinnerFlags(before ?? plan), dinnerDate)
   const dinner = plan.days.find((d) => d.date === dinnerDate)?.dinner
-  if (!deps.length || !dinner) return { plan, changed: [] }
+  if (!deps.length || (!dinner && mode !== "skipped")) return { plan, changed: [] }
 
   const next = addDaysStr(dinnerDate, 1)
   const wanted = deps.map((d) =>
@@ -654,9 +667,15 @@ async function syncDependents(
     : d.date === dinnerDate ? `car_dinner_same_day: the car dinner on ${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}`
     : `car_dinner_next_day: the car dinner on ${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}`)
 
-  const extra = [
+  const extra = mode === "skipped" ? [
     `The current plan for the week is:\n${planSummaryLines(plan)}`,
-    `The dinner on ${DAY_NAMES[weekdayIndex(dinnerDate)]} ${dinnerDate} has changed to "${dinner.title}"${dinner.notes ? ` (${dinner.notes})` : ""}.`,
+    `The family is eating out on ${DAY_NAMES[weekdayIndex(dinnerDate)]} ${dinnerDate}, so there is no home-cooked dinner that evening and no leftovers from it.`,
+    `Rewrite only these so they no longer rely on that dinner:\n- ${wanted.join("\n- ")}`,
+    "Suggest simple standalone meals with ingredients and set based_on null. Hot lunchboxes must reheat well in a food flask, cold ones must be good cold, car dinners must be portable.",
+    "Return them with the submit_updates tool.",
+  ].join("\n") : [
+    `The current plan for the week is:\n${planSummaryLines(plan)}`,
+    `The dinner on ${DAY_NAMES[weekdayIndex(dinnerDate)]} ${dinnerDate} has changed to "${dinner!.title}"${dinner!.notes ? ` (${dinner!.notes})` : ""}.`,
     `Rewrite only these so they stay in step with the new dinner:\n- ${wanted.join("\n- ")}`,
     "Make each one from the new dinner where it suits: plain leftovers (source \"leftovers\") or a slight variation (source \"variation\", list only the extra ingredients).",
     `Set based_on to "previous_day" for the lunchbox and for a car dinner on ${next}, and "same_day" for a car dinner on ${dinnerDate}.`,
@@ -675,6 +694,7 @@ async function syncDependents(
     const key = dep.slot === "lunchbox" ? "lunchbox_next_day" : dep.date === dinnerDate ? "car_dinner_same_day" : "car_dinner_next_day"
     const meal = cleanMeal(raw[key] ?? null, ctx)
     if (!meal) continue
+    if (mode === "skipped") meal.based_on = null
     const day = days.find((x) => x.date === dep.date)!
     if (dep.slot === "lunchbox") {
       const kind = lunchKindFor(ctx, dep.date)
@@ -695,6 +715,61 @@ export async function syncAfterDinnerChange(
   if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
   const { plan, changed } = await syncDependents(ctx, ctx.existingPlan.plan, dinnerDate)
   const row = await savePlan(supabase, ctx.existingPlan.id, plan)
+  return { row, changed }
+}
+
+/** After a dinner is put back: the lunchbox / car dinners that could be made from it again. */
+function candidatesFor(plan: WeekPlan, dinnerDate: string): { date: string; slot: "lunchbox" | "car_dinner" }[] {
+  const next  = addDaysStr(dinnerDate, 1)
+  const today = plan.days.find((d) => d.date === dinnerDate)
+  const tomo  = plan.days.find((d) => d.date === next)
+  const out: { date: string; slot: "lunchbox" | "car_dinner" }[] = []
+  const lb = tomo?.lunchbox
+  if (lb && !lb.locked && (lb.kind === "hot" || lb.kind === "cold") && !lb.based_on) out.push({ date: next, slot: "lunchbox" })
+  if (today?.car_dinner && !today.car_dinner.locked && !today.car_dinner.based_on) out.push({ date: dinnerDate, slot: "car_dinner" })
+  return out
+}
+
+/**
+ * Clears a meal (e.g. eating out) or puts it back. Linked lunchboxes and
+ * car dinners are rewritten so they do not rely on a dinner that is not cooked.
+ */
+export async function setSkipped(
+  supabase: SupabaseClient, weekStart: string, date: string, slot: SlotKey, skip: boolean,
+): Promise<{ row: MealPlanRow; changed: string[] }> {
+  const ctx = await loadContext(supabase, weekStart)
+  if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
+  const plan = ctx.existingPlan.plan
+  const day  = plan.days.find((d) => d.date === date)
+  if (!day) throw new Error("That day is not in this plan")
+
+  const skipped = new Set(day.skipped ?? [])
+  const saved   = { ...(day.skipped_meals ?? {}) }
+  let nextDay: PlanDay
+  if (skip) {
+    if (day[slot]) saved[slot] = day[slot]!
+    skipped.add(slot)
+    nextDay = { ...day, [slot]: null, skipped: Array.from(skipped), skipped_meals: saved }
+  } else {
+    skipped.delete(slot)
+    const back = saved[slot] ?? null
+    delete saved[slot]
+    nextDay = {
+      ...day,
+      [slot]: slot === "lunchbox" && back ? { ...(back as PlannedLunchbox), kind: (back as PlannedLunchbox).kind ?? lunchKindFor(ctx, date) } : back,
+      skipped: Array.from(skipped),
+      skipped_meals: saved,
+    }
+  }
+
+  let updated: WeekPlan = { ...plan, days: plan.days.map((d) => (d.date === date ? nextDay : d)) }
+  let changed: string[] = []
+  if (slot === "dinner") {
+    const synced = await syncDependents(ctx, updated, date, skip ? "skipped" : "restored", plan)
+    updated = synced.plan
+    changed = synced.changed
+  }
+  const row = await savePlan(supabase, ctx.existingPlan.id, updated)
   return { row, changed }
 }
 
@@ -865,7 +940,15 @@ export async function confirmPlan(
     return bits.length ? bits.join(". ") : null
   }
 
+  const deletes: { date: string; meal_type: string }[] = []
   for (const day of plan.days) {
+    for (const slot of day.skipped ?? []) {
+      if (slot === "dinner" || slot === "lunch") {
+        writes.push({ date: day.date, meal_type: slot, title: EATING_OUT_TITLE, notes: null, for_member_id: null, freezer_item_id: null })
+      } else {
+        deletes.push({ date: day.date, meal_type: slot })
+      }
+    }
     if (day.dinner) writes.push({ date: day.date, meal_type: "dinner", title: day.dinner.title, notes: noteFor(day.dinner), for_member_id: null, freezer_item_id: day.dinner.freezer_item_id ?? null })
     if (day.lunch)  writes.push({ date: day.date, meal_type: "lunch",  title: day.lunch.title,  notes: noteFor(day.lunch),  for_member_id: null, freezer_item_id: day.lunch.freezer_item_id ?? null })
     if (day.lunchbox && day.lunchbox.kind !== "none") {
@@ -884,6 +967,12 @@ export async function confirmPlan(
       ? await supabase.from("meals").update(w).eq("id", id)
       : await supabase.from("meals").insert(w)
     if (res.error) throw new Error(`Could not save ${w.meal_type} on ${w.date}: ${res.error.message}`)
+  }
+
+  // Cleared lunchboxes / car dinners: remove any rows from an earlier confirm
+  for (const d of deletes) {
+    const { error: delErr } = await supabase.from("meals").delete().eq("date", d.date).eq("meal_type", d.meal_type)
+    if (delErr) throw new Error(`Could not clear ${d.meal_type} on ${d.date}: ${delErr.message}`)
   }
 
   // 3. Take freezer portions

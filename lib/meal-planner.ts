@@ -91,6 +91,10 @@ export interface PlanDay {
   lunch: PlannedMeal | null
   lunchbox: PlannedLunchbox | null
   car_dinner: PlannedMeal | null
+  /** Slots the family has cleared (e.g. eating out); replans leave them empty */
+  skipped?: SlotKey[]
+  /** What was there before clearing, so it can be put back */
+  skipped_meals?: Partial<Record<SlotKey, PlannedMeal | PlannedLunchbox>>
 }
 
 export interface BatchDish {
@@ -335,11 +339,14 @@ export function linkDinnerFlags(plan: WeekPlan): WeekPlan {
     if (lb && (lb.kind === "hot" || lb.kind === "cold")) {
       if (!lb.based_on && derived(lb)) lb.based_on = "previous_day"
       if (lb.based_on === "same_day") lb.based_on = "previous_day" // lunch is eaten before that day's dinner
+      if (lb.based_on === "previous_day" && i > 0 && !days[i - 1].dinner) lb.based_on = null // that dinner was cleared
       if (lb.based_on === "previous_day" && i > 0 && days[i - 1].dinner) days[i - 1].dinner!.extra_for_lunchbox = true
     }
     const car = d.car_dinner
     if (car) {
       if (!car.based_on && derived(car)) car.based_on = "same_day"
+      if (car.based_on === "same_day" && !d.dinner) car.based_on = null
+      if (car.based_on === "previous_day" && i > 0 && !days[i - 1].dinner) car.based_on = null
       if (car.based_on === "same_day" && d.dinner) d.dinner.extra_for_car_dinner = true
       if (car.based_on === "previous_day" && i > 0 && days[i - 1].dinner) days[i - 1].dinner!.extra_for_car_dinner = true
     }
@@ -364,4 +371,19 @@ export function dependentsOf(plan: WeekPlan, dinnerDate: string): { date: string
 export function sourceDinnerDate(date: string, meal: PlannedMeal | null | undefined): string | null {
   if (!meal?.based_on) return null
   return meal.based_on === "same_day" ? date : addDaysStr(date, -1)
+}
+
+// ── Cleared slots ────────────────────────────────────────────────────────────
+
+export const SKIPPED_LABELS: Record<SlotKey, string> = {
+  dinner: "Eating out",
+  lunch: "Eating out",
+  lunchbox: "No lunchbox",
+  car_dinner: "Not needed",
+}
+
+export const EATING_OUT_TITLE = "Eating out"
+
+export function isSkipped(day: PlanDay, slot: SlotKey): boolean {
+  return Boolean(day.skipped?.includes(slot))
 }

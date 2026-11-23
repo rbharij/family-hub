@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Clock, Users, Gauge, Loader2, RefreshCw, Lock, LockOpen, BookmarkPlus, Snowflake, Sunrise, Lightbulb, ChefHat, Shuffle, Check,
+  Clock, Users, Gauge, Loader2, RefreshCw, Lock, LockOpen, BookmarkPlus, Snowflake, Sunrise, Lightbulb, ChefHat, Shuffle, Check, X,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import { DAY_FULL } from "../_utils"
 const EFFORT_LABEL: Record<string, string> = { easy: "Easy", medium: "Medium", ambitious: "Ambitious" }
 
 export function RecipeDialog({
-  open, onClose, weekStart, date, slot, meal, lunchKind, busy, onChoose, onMoreOptions, onToggleLock, onSaveRecipe, onFreeze,
+  open, onClose, weekStart, date, slot, meal, lunchKind, busy, onChoose, onMoreOptions, onToggleLock, onSaveRecipe, onFreeze, onClear,
 }: {
   open: boolean
   onClose: () => void
@@ -31,6 +31,7 @@ export function RecipeDialog({
   onToggleLock: () => void
   onSaveRecipe: (recipe: RecipeDetail | null) => void
   onFreeze: () => void
+  onClear: () => void
 }) {
   const [hint, setHint] = useState("")
   const [recipe, setRecipe]   = useState<RecipeDetail | null>(meal?.recipe ?? null)
@@ -220,6 +221,9 @@ export function RecipeDialog({
           ) : null}
           <Button variant="outline" className="rounded-xl gap-2" onClick={() => onSaveRecipe(recipe)} disabled={!recipe}>
             <BookmarkPlus className="size-4" /> Save to recipes
+          </Button>
+          <Button variant="outline" className="rounded-xl gap-2 text-destructive" onClick={onClear} disabled={busy}>
+            <X className="size-4" /> {slot === "dinner" || slot === "lunch" ? "Clear: eating out" : "Clear: not needed"}
           </Button>
           <Button variant="ghost" className="rounded-xl gap-2 ml-auto text-muted-foreground" onClick={() => load(true)} disabled={loading}>
             <RefreshCw className="size-4" /> Rewrite recipe
