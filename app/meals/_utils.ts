@@ -1,4 +1,4 @@
-export type MealType = "dinner" | "lunch" | "lunchbox"
+export type MealType = "dinner" | "lunch" | "lunchbox" | "car_dinner"
 
 export interface Meal {
   id: string
@@ -6,7 +6,8 @@ export interface Meal {
   meal_type: MealType
   title: string
   notes: string | null
-  for_member_id: string | null  // set for per-child lunchbox rows
+  for_member_id: string | null  // set for per-child lunchbox rows and car dinners
+  freezer_item_id?: string | null
   created_at: string
 }
 
@@ -48,22 +49,25 @@ export function weekDays(monday: Date): Date[] {
 export const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 export const DAY_FULL   = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
-export const MEAL_TYPES: MealType[] = ["dinner", "lunch", "lunchbox"]
+export const MEAL_TYPES: MealType[] = ["dinner", "lunch", "lunchbox", "car_dinner"]
 
 export const MEAL_LABELS: Record<MealType, string> = {
   dinner:   "Dinner",
   lunch:    "Lunch",
   lunchbox: "Lunchbox",
+  car_dinner: "Car dinner",
 }
 
 export const MEAL_PLACEHOLDERS: Record<MealType, string> = {
   dinner:   "Add dinner…",
   lunch:    "Add lunch…",
   lunchbox: "Add lunchbox…",
+  car_dinner: "Add car dinner…",
 }
 
 export const MEAL_EMOJIS: Record<MealType, string> = {
   dinner:   "🍽️",
   lunch:    "🥗",
   lunchbox: "🥪",
+  car_dinner: "🚗",
 }

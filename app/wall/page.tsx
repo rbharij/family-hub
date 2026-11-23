@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, CheckCircle2, Check, Flame, MessageSquare, RefreshCw, Soup, Cake, CalendarDays } from "lucide-react"
+import { X, CheckCircle2, Check, Flame, MessageSquare, RefreshCw, Soup, Cake, CalendarDays, Car, Snowflake, ChefHat } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
@@ -52,6 +52,7 @@ const WALL_TABLES = [
   { table: "messages" },
   { table: "birthdays" },
   { table: "member_weekly_plants" },
+  { table: "meal_plans" },
 ] as const
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -89,7 +90,10 @@ interface Meal {
   date: string
   notes: string | null
   for_member_id: string | null
+  freezer_item_id?: string | null
 }
+
+interface HeadsUp { icon: "car" | "freezer" | "batch"; text: string }
 
 interface WallMessage {
   id: string
@@ -147,6 +151,9 @@ export default function WallPage() {
   const [wallMessages, setWallMessages]           = useState<WallMessage[]>([])
   const [choreStreaks, setChoreStreaks]            = useState<Map<string, WallChoreStreak>>(new Map())
   const [wallMemberPlants, setWallMemberPlants]   = useState<WallMemberPlant[]>([])
+  const [carDinnerToday, setCarDinnerToday]       = useState<Meal | null>(null)
+  const [defrostTonight, setDefrostTonight]       = useState<Meal[]>([])
+  const [batchToday, setBatchToday]               = useState<string[]>([])
 
   // Clock
   useEffect(() => {
@@ -168,7 +175,7 @@ export default function WallPage() {
     const p2 = (n: number) => String(n).padStart(2, "0")
     const weekMondayStr = `${weekMonday.getFullYear()}-${p2(weekMonday.getMonth()+1)}-${p2(weekMonday.getDate())}`
 
-    const [evRes, memRes, ctRes, cmRes, mealRes, msgRes, bdRes, strRes, wpRes] = await Promise.all([
+    const [evRes, memRes, ctRes, cmRes, mealRes, msgRes, bdRes, strRes, wpRes, planRes] = await Promise.all([
       // Look back 30 days so multi-day events that started before today are included,
       // then filter in JS to events that still overlap with the current week.
       supabase.from("events").select("id,title,start_at,end_at,is_all_day,color")
@@ -178,12 +185,13 @@ export default function WallPage() {
       supabase.from("family_members").select("*").order("created_at"),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", todayStr),
       supabase.from("chores").select("id,title,assigned_to,completed,completed_at,pocket_money_value").eq("due_date", tomorrowStr),
-      supabase.from("meals").select("id,title,meal_type,date,notes,for_member_id").in("date", [todayStr, tomorrowStr]),
+      supabase.from("meals").select("id,title,meal_type,date,notes,for_member_id,freezer_item_id").in("date", [todayStr, tomorrowStr]),
       supabase.from("messages").select("id,from_member_id,to_member_id,body,created_at,dismissed_at")
         .is("dismissed_at", null).order("created_at", { ascending: false }),
       supabase.from("birthdays").select("id,name,date,type,color"),
       supabase.from("chore_streaks").select("member_id,streak_count,longest_streak"),
       supabase.from("member_weekly_plants").select("plant_id,member_id,created_at").eq("week_start", weekMondayStr),
+      supabase.from("meal_plans").select("plan").eq("week_start", weekMondayStr).maybeSingle(),
     ])
 
     // Keep only events that end on or after today (catches multi-day events in progress)
@@ -208,6 +216,14 @@ export default function WallPage() {
     setDinnerTomorrow(meals.find(m => m.date === tomorrowStr && m.meal_type === "dinner") ?? null)
     setLunchboxesToday(meals.filter(m => m.date === todayStr   && m.meal_type === "lunchbox"))
     setLunchboxesTomorrow(meals.filter(m => m.date === tomorrowStr && m.meal_type === "lunchbox"))
+    setCarDinnerToday(meals.find(m => m.date === todayStr && m.meal_type === "car_dinner") ?? null)
+    // One reminder per freezer dish (lunchbox rows repeat per child)
+    const frozen = meals.filter(m => m.date === tomorrowStr && m.freezer_item_id)
+    setDefrostTonight(frozen.filter((m, i) => frozen.findIndex(x => x.freezer_item_id === m.freezer_item_id) === i))
+
+    // Batch cook session today (from this week's meal plan, if any)
+    const batch = (planRes.data as { plan?: { batch_session?: { date: string; done?: boolean; dishes: { title: string }[] } | null } } | null)?.plan?.batch_session
+    setBatchToday(batch && batch.date === todayStr && !batch.done ? batch.dishes.map(d => d.title) : [])
   }, [supabase])
 
   useEffect(() => {
@@ -348,7 +364,11 @@ export default function WallPage() {
         {/* ════════════════ COL 1: MEALS + PLANTS ════════════════ */}
         <ErrorBoundary label="Meals">
           <div className="flex flex-col gap-5 min-h-0">
-            <DinnerHero dinner={dinnerToday} />
+            <DinnerHero dinner={dinnerToday} headsUp={[
+              ...(carDinnerToday ? [{ icon: "car" as const, text: `Car dinner${carDinnerToday.for_member_id && memberMap.get(carDinnerToday.for_member_id) ? ` for ${memberMap.get(carDinnerToday.for_member_id)!.name}` : ""}: ${carDinnerToday.title}` }] : []),
+              ...defrostTonight.map(m => ({ icon: "freezer" as const, text: `Defrost tonight: ${m.title} for tomorrow` })),
+              ...(batchToday.length ? [{ icon: "batch" as const, text: `Batch cook today: ${batchToday.join(", ")}` }] : []),
+            ]} />
 
             <Card className="px-7 py-5">
               <Kicker>Lunchboxes today</Kicker>
@@ -467,7 +487,7 @@ function Avatar({ member, className }: { member: Member | null | undefined; clas
 
 // ── Meals ──────────────────────────────────────────────────────────────────────
 
-function DinnerHero({ dinner }: { dinner: Meal | null }) {
+function DinnerHero({ dinner, headsUp = [] }: { dinner: Meal | null; headsUp?: HeadsUp[] }) {
   return (
     <section className="rounded-[28px] bg-primary text-primary-foreground px-7 py-6 flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -487,6 +507,19 @@ function DinnerHero({ dinner }: { dinner: Meal | null }) {
         </>
       ) : (
         <h2 className="font-display text-[30px] font-semibold leading-tight opacity-80">Nothing planned yet</h2>
+      )}
+      {headsUp.length > 0 && (
+        <div className="flex flex-col gap-1.5 border-t border-white/20 pt-3 mt-1">
+          {headsUp.map((h, i) => {
+            const Icon = h.icon === "car" ? Car : h.icon === "freezer" ? Snowflake : ChefHat
+            return (
+              <p key={i} className="flex items-center gap-2 text-[16px] font-medium leading-snug">
+                <Icon className="size-4 shrink-0 opacity-80" />
+                <span className="truncate">{h.text}</span>
+              </p>
+            )
+          })}
+        </div>
       )}
     </section>
   )

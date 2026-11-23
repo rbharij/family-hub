@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Copy, Plus } from "lucide-react"
+import Link from "next/link"
+import { ChevronLeft, ChevronRight, Copy, Plus, Sparkles, Car } from "lucide-react"
 import { MemberAvatar } from "@/components/member-avatar"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -50,6 +51,9 @@ export default function MealsPage() {
   const [editForMemberId, setEditForMemberId]   = useState<string | null>(null)
   const [editForMemberName, setEditForMemberName] = useState<string | null>(null)
 
+  const [carDinnerDays, setCarDinnerDays]   = useState<number[]>([])
+  const [carMember, setCarMember]           = useState<FamilyMember | null>(null)
+
   const [dayPlantMap, setDayPlantMap] = useState<Map<string, { count: number; plants: { name: string; emoji: string | null }[] }>>(new Map())
 
   const supabase        = useRef(createClient()).current
@@ -64,6 +68,16 @@ export default function MealsPage() {
     supabase.from("family_members").select("*").eq("is_child", true).then(({ data }) => {
       setChildMembers(data ?? [])
     })
+    // Car dinner days from the meal planner setup (ignored if not set up yet)
+    supabase.from("meal_planner_settings").select("car_dinner_days, car_dinner_member_id").limit(1).maybeSingle()
+      .then(async ({ data }) => {
+        if (!data) return
+        setCarDinnerDays((data.car_dinner_days as number[] | null) ?? [])
+        if (data.car_dinner_member_id) {
+          const { data: m } = await supabase.from("family_members").select("*").eq("id", data.car_dinner_member_id).maybeSingle()
+          setCarMember((m as FamilyMember | null) ?? null)
+        }
+      })
   }, [supabase])
 
   // ── Data ───────────────────────────────────────────────────────────────────
@@ -127,6 +141,10 @@ export default function MealsPage() {
 
   function getLunch(date: string): Meal | null {
     return meals.find((m) => m.date === date && m.meal_type === "lunch") ?? null
+  }
+
+  function getCarDinner(date: string): Meal | null {
+    return meals.find((m) => m.date === date && m.meal_type === "car_dinner") ?? null
   }
 
   function getLunchbox(date: string, memberId: string): Meal | null {
@@ -263,6 +281,10 @@ export default function MealsPage() {
 
         <div className="ml-auto flex items-center gap-3">
           <SummaryPill count={dinnersPlanned} total={7} label="dinners planned" loading={loading} />
+          <Link href="/meals/planner" className={cn(buttonVariants(), "h-11 px-4 rounded-xl gap-2")}>
+            <Sparkles className="size-4" />
+            <span className="hidden sm:inline">Plan my week</span>
+          </Link>
           <Button variant="outline" className="h-11 px-4 rounded-xl bg-card gap-2" onClick={() => setCopyDialogOpen(true)}>
             <Copy className="size-4" />
             <span className="hidden sm:inline">Copy last week</span>
@@ -292,6 +314,9 @@ export default function MealsPage() {
               isToday={toDateStr(day) === toDateStr(today)}
               dinnerMeal={getDinner(toDateStr(day))}
               lunchMeal={getLunch(toDateStr(day))}
+              carDinnerMeal={getCarDinner(toDateStr(day))}
+              showCarDinner={carDinnerDays.includes(di)}
+              carMember={carMember}
               childMembers={childMembers}
               getLunchbox={(memberId) => getLunchbox(toDateStr(day), memberId)}
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
@@ -352,6 +377,9 @@ export default function MealsPage() {
               isToday={toDateStr(days[mobileDay]) === toDateStr(today)}
               dinnerMeal={getDinner(toDateStr(days[mobileDay]))}
               lunchMeal={getLunch(toDateStr(days[mobileDay]))}
+              carDinnerMeal={getCarDinner(toDateStr(days[mobileDay]))}
+              showCarDinner={carDinnerDays.includes(mobileDay)}
+              carMember={carMember}
               childMembers={childMembers}
               getLunchbox={(memberId) => getLunchbox(toDateStr(days[mobileDay]), memberId)}
               onSlotClick={(type, meal, forMemberId, forMemberName) =>
@@ -423,13 +451,17 @@ function SummaryPill({ count, total, label, loading }: {
 
 function DayColumn({
   day, dayIdx, isToday,
-  dinnerMeal, lunchMeal, childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
+  dinnerMeal, lunchMeal, carDinnerMeal, showCarDinner, carMember,
+  childMembers, getLunchbox, onSlotClick, dayPlants, mobile = false,
 }: {
   day: Date
   dayIdx: number
   isToday: boolean
   dinnerMeal: Meal | null
   lunchMeal: Meal | null
+  carDinnerMeal: Meal | null
+  showCarDinner: boolean
+  carMember: FamilyMember | null
   childMembers: FamilyMember[]
   getLunchbox: (memberId: string) => Meal | null
   onSlotClick: (type: MealType, meal: Meal | null, forMemberId: string | null, forMemberName: string | null) => void
@@ -475,6 +507,19 @@ function DayColumn({
             onClick={() => onSlotClick("lunchbox", meal, child.id, child.name)} />
         )
       })}
+
+      {(carDinnerMeal || showCarDinner) && (
+        <SlotShell filled={Boolean(carDinnerMeal)} mobile={mobile}
+          onClick={() => onSlotClick("car_dinner", carDinnerMeal, carMember?.id ?? carDinnerMeal?.for_member_id ?? null, carMember?.name ?? null)}>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <Car className="size-3.5 text-muted-foreground" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground truncate">
+              Car dinner{carMember ? ` · ${carMember.name}` : ""}
+            </span>
+          </span>
+          {carDinnerMeal ? <MealText meal={carDinnerMeal} mobile={mobile} /> : <AddHint mobile={mobile} />}
+        </SlotShell>
+      )}
 
       {childMembers.length === 0 && (
         <MealSlot label="Lunchbox" meal={null} mobile={mobile}
