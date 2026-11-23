@@ -188,6 +188,25 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     }
   }
 
+  async function pickSavedRecipe(date: string, slot: SlotKey, recipeId: string) {
+    setBusySlot(`${date}|${slot}`)
+    try {
+      const res  = await fetch("/api/meal-plan/use-recipe", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekStart, date, slot, recipeId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Something went wrong")
+      setRow(data.plan)
+      toast.success(data.changed?.length ? `Recipe added. Also updated: ${data.changed.join(", ")}` : "Recipe added")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't use that recipe")
+    } finally {
+      setBusySlot(null)
+    }
+  }
+
   async function syncLinked(date: string) {
     setBusySlot(`${date}|dinner`)
     try {
@@ -459,6 +478,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
             onSaveRecipe={(recipe) => meal && saveToRecipes(meal, recipe)}
             onFreeze={() => meal && freezeExtra(openMeal.date, meal)}
             onClear={() => setSkip(openMeal.date, openMeal.slot, true)}
+            onUseRecipe={(id) => pickSavedRecipe(openMeal.date, openMeal.slot, id)}
           />
         )
       })()}
@@ -602,6 +622,7 @@ function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOp
       <p className="font-semibold text-[13.5px] leading-snug line-clamp-3 pr-6 break-words hyphens-auto">{meal.title}</p>
       <div className="flex flex-wrap gap-1 mt-auto">
         {slot === "dinner" && meal.protein && <ProteinChip protein={meal.protein} small onPrimary />}
+        {meal.recipe_id && <Chip onPrimary={isDinner}><BookOpen className="size-3" />Saved</Chip>}
         {linkedFrom && <Chip onPrimary={isDinner}><CornerDownRight className="size-3" />{linkedFrom}</Chip>}
         {slot === "lunchbox" && lunchKind && (
           <Chip onPrimary={isDinner}>{lunchKind === "hot" ? "Hot" : "Cold"}</Chip>

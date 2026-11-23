@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Clock, Users, Gauge, Loader2, RefreshCw, Lock, LockOpen, BookmarkPlus, Snowflake, Sunrise, Lightbulb, ChefHat, Shuffle, Check, X,
+  Clock, Users, Gauge, Loader2, RefreshCw, Lock, LockOpen, BookmarkPlus, Snowflake, Sunrise, Lightbulb, ChefHat, Shuffle, Check, X, BookOpen, ExternalLink, Search,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -12,11 +12,12 @@ import {
   type PlannedMeal, type RecipeDetail, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
 import { DAY_FULL } from "../_utils"
+import { createClient } from "@/lib/supabase"
 
 const EFFORT_LABEL: Record<string, string> = { easy: "Easy", medium: "Medium", ambitious: "Ambitious" }
 
 export function RecipeDialog({
-  open, onClose, weekStart, date, slot, meal, lunchKind, busy, onChoose, onMoreOptions, onToggleLock, onSaveRecipe, onFreeze, onClear,
+  open, onClose, weekStart, date, slot, meal, lunchKind, busy, onChoose, onMoreOptions, onToggleLock, onSaveRecipe, onFreeze, onClear, onUseRecipe,
 }: {
   open: boolean
   onClose: () => void
@@ -32,9 +33,13 @@ export function RecipeDialog({
   onSaveRecipe: (recipe: RecipeDetail | null) => void
   onFreeze: () => void
   onClear: () => void
+  onUseRecipe: (recipeId: string) => void
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [hint, setHint] = useState("")
   const [recipe, setRecipe]   = useState<RecipeDetail | null>(meal?.recipe ?? null)
+  // Close the recipe picker whenever another meal is shown
+  useEffect(() => { setPickerOpen(false) }, [meal?.title, open])
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
 
@@ -113,7 +118,24 @@ export function RecipeDialog({
               />
             ))}
           </div>
+          {pickerOpen && (
+            <SavedRecipePicker
+              disabled={busy || Boolean(meal.locked)}
+              currentRecipeId={meal.recipe_id ?? null}
+              onPick={(id) => { onUseRecipe(id); setPickerOpen(false) }}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+
           <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              variant={pickerOpen ? "secondary" : "outline"}
+              className="rounded-xl gap-2 h-10 shrink-0"
+              onClick={() => setPickerOpen((o) => !o)}
+              disabled={busy || meal.locked}
+            >
+              <BookOpen className="size-4" /> From saved recipes
+            </Button>
             <input
               value={hint}
               onChange={(e) => setHint(e.target.value)}
@@ -139,6 +161,16 @@ export function RecipeDialog({
         {(recipe?.effort_note || total > 0 || meal.source !== "fresh" || meal.protein) && (
           <div className="flex flex-wrap gap-1.5">
             {meal.protein && <Pill>{PROTEIN_LABELS[meal.protein]}</Pill>}
+            {meal.recipe_id && (
+              <Pill>
+                <BookOpen className="size-3.5" /> Your saved recipe
+                {meal.recipe_url && (
+                  <a href={meal.recipe_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline underline-offset-2">
+                    open <ExternalLink className="size-3" />
+                  </a>
+                )}
+              </Pill>
+            )}
             {sourceDinnerDate(date, meal) && (
               <Pill>Made from {DAY_FULL[weekdayIndex(sourceDinnerDate(date, meal)!)]}&apos;s dinner</Pill>
             )}
@@ -276,6 +308,80 @@ function OptionCard({ meal, chosen = false, disabled, onChoose }: {
           <Button size="sm" variant="outline" className="rounded-lg" onClick={onChoose} disabled={disabled}>Choose this</Button>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Saved recipe picker ─────────────────────────────────────────────────────
+
+interface SavedRecipe { id: string; title: string; tags: string[]; notes: string | null }
+
+function SavedRecipePicker({ disabled, currentRecipeId, onPick, onClose }: {
+  disabled: boolean
+  currentRecipeId: string | null
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  const supabase = useRef(createClient()).current
+  const [recipes, setRecipes] = useState<SavedRecipe[] | null>(null)
+  const [query, setQuery]     = useState("")
+
+  useEffect(() => {
+    supabase.from("recipes").select("id, title, tags, notes").order("title")
+      .then(({ data }) => setRecipes((data ?? []) as SavedRecipe[]))
+  }, [supabase])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!recipes) return []
+    if (!q) return recipes
+    return recipes.filter((r) =>
+      r.title.toLowerCase().includes(q) || r.tags.some((t) => t.toLowerCase().includes(q)))
+  }, [recipes, query])
+
+  return (
+    <div className="rounded-xl border border-border bg-background p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search your recipes or tags…"
+            className="w-full h-10 rounded-lg border border-input bg-background pl-9 pr-3 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+      </div>
+      <div className="max-h-64 overflow-y-auto flex flex-col divide-y divide-border">
+        {recipes === null ? (
+          <p className="flex items-center gap-2 text-[14px] text-muted-foreground py-3"><Loader2 className="size-4 animate-spin" /> Loading…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-[14px] text-muted-foreground py-3">
+            {recipes.length === 0 ? "No saved recipes yet. Save one from any meal, or add them on the Recipes page." : "No recipes match that search."}
+          </p>
+        ) : filtered.map((r) => (
+          <div key={r.id} className="flex items-center gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[14.5px] font-semibold truncate">{r.title}</p>
+              {r.tags.length > 0 && (
+                <p className="text-[12.5px] text-muted-foreground truncate">{r.tags.join(" · ")}</p>
+              )}
+            </div>
+            {r.id === currentRecipeId ? (
+              <span className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-primary"><Check className="size-3.5" /> Chosen</span>
+            ) : (
+              <Button size="sm" variant="outline" className="rounded-lg shrink-0" disabled={disabled} onClick={() => onPick(r.id)}>
+                Use this
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        Claude fills in the ingredients for your household from the recipe&apos;s notes, and updates any lunchbox or car dinner made from it.
+      </p>
     </div>
   )
 }

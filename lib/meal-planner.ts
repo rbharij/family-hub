@@ -65,6 +65,9 @@ export interface PlannedMeal {
   alternatives?: PlannedMeal[]
   /** An alternative whose ingredients still need filling in when chosen */
   incomplete?: boolean
+  /** Chosen from the family's saved recipes */
+  recipe_id?: string | null
+  recipe_url?: string | null
 }
 
 export interface RecipeDetail {

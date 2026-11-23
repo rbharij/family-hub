@@ -861,15 +861,27 @@ export async function chooseOption(
     chosen = full
   }
 
-  // Keep the previous choice's recipe so switching back is instant
+  return applyChosen(supabase, ctx, plan, date, slot, chosen, alts.filter((_, i) => i !== index))
+}
+
+/**
+ * Puts `chosen` into the slot. The previous meal (with its recipe, so
+ * switching back is instant) joins the other options, and for dinners the
+ * linked lunchbox / car dinner are brought into line.
+ */
+async function applyChosen(
+  supabase: SupabaseClient, ctx: PlannerContext, plan: WeekPlan,
+  date: string, slot: SlotKey, chosen: PlannedMeal, others: PlannedMeal[],
+): Promise<{ row: MealPlanRow; changed: string[] }> {
+  const current = plan.days.find((d) => d.date === date)?.[slot]
+  if (!current) throw new Error("That meal is not in the plan")
   const { alternatives: _a, ...previous } = current
   void _a
-  const others = alts.filter((_, i) => i !== index)
   const next: PlannedMeal = {
     ...chosen,
     incomplete: false,
     locked: current.locked,
-    alternatives: [{ ...previous, incomplete: false }, ...others],
+    alternatives: [{ ...previous, incomplete: false }, ...others].slice(0, 6),
   }
 
   const days = plan.days.map((d) => {
@@ -884,8 +896,42 @@ export async function chooseOption(
     updated = synced.plan
     changed = synced.changed
   }
-  const row = await savePlan(supabase, ctx.existingPlan.id, updated)
+  const row = await savePlan(supabase, ctx.existingPlan!.id, updated)
   return { row, changed }
+}
+
+/** Uses one of the family's saved recipes for this meal. */
+export async function applySavedRecipe(
+  supabase: SupabaseClient, weekStart: string, date: string, slot: SlotKey, recipeId: string,
+): Promise<{ row: MealPlanRow; changed: string[] }> {
+  const ctx = await loadContext(supabase, weekStart)
+  if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
+  const plan    = ctx.existingPlan.plan
+  const current = plan.days.find((d) => d.date === date)?.[slot]
+  if (!current) throw new Error("That meal is not in the plan")
+
+  const { data: rec, error } = await supabase.from("recipes").select("id, title, notes, url, tags").eq("id", recipeId).single()
+  if (error || !rec) throw new Error("That recipe could not be found")
+  const recipe = rec as { id: string; title: string; notes: string | null; url: string | null; tags: string[] }
+
+  const extra = [
+    `The current plan for the week is:\n${planSummaryLines(plan)}`,
+    `The family chose their saved recipe "${recipe.title}" for the ${slot.replace("_", " ")} on ${DAY_NAMES[weekdayIndex(date)]} ${date}.`,
+    recipe.tags?.length ? `Recipe tags: ${recipe.tags.join(", ")}` : "",
+    recipe.notes ? `Their saved notes for it (use these ingredients and quantities where given):\n${recipe.notes.slice(0, 3000)}` : "",
+    "Return exactly this meal, keeping the same title, with protein, cook_minutes, effort and ingredients scaled for this household, using the submit_meal tool. Keep notes to one short line.",
+  ].filter(Boolean).join("\n")
+
+  const user = buildUserPrompt(ctx, collectLocked(ctx, false), extra)
+  const raw  = await callClaude<PlannedMeal>(user, COMPLETE_TOOL, 2000)
+  const full = cleanMeal({ ...raw, title: recipe.title, source: raw.source === "freezer" ? "fresh" : raw.source, alternatives: undefined }, ctx)
+  if (!full) throw new Error("Claude did not return the meal")
+  full.recipe_id  = recipe.id
+  full.recipe_url = recipe.url
+
+  // Drop this recipe from the options if it was already one of them
+  const others = (current.alternatives ?? []).filter((a) => a.title.toLowerCase() !== recipe.title.toLowerCase())
+  return applyChosen(supabase, ctx, plan, date, slot, full, others)
 }
 
 /**
@@ -1093,7 +1139,13 @@ export async function getRecipe(
     (settings as { household_notes?: string | null } | null)?.household_notes ? `Household notes: ${(settings as { household_notes: string }).household_notes}` : "",
   ].filter(Boolean).join("\n")
 
-  const raw = await callClaude<Partial<RecipeDetail>>(lines, RECIPE_TOOL, 3000, RECIPE_SYSTEM)
+  let prompt = lines
+  if (meal.recipe_id) {
+    const { data: saved } = await supabase.from("recipes").select("notes, url").eq("id", meal.recipe_id).maybeSingle()
+    const notes = (saved as { notes: string | null } | null)?.notes
+    if (notes) prompt += `\nThis is the family's own saved recipe. Follow their notes closely, only filling gaps:\n${notes.slice(0, 3000)}`
+  }
+  const raw = await callClaude<Partial<RecipeDetail>>(prompt, RECIPE_TOOL, 3000, RECIPE_SYSTEM)
   const recipe: RecipeDetail = {
     serves: raw.serves ?? serves,
     prep_minutes: raw.prep_minutes ?? null,
