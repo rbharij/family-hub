@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
-  SLOT_LABELS, SOURCE_LABELS, LUNCH_KIND_LABELS, weekdayIndex,
+  SLOT_LABELS, SOURCE_LABELS, LUNCH_KIND_LABELS, PROTEIN_LABELS, weekdayIndex, sourceDinnerDate,
   type PlannedMeal, type RecipeDetail, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
 import { DAY_FULL } from "../_utils"
@@ -95,7 +95,11 @@ export function RecipeDialog({
         <section className="rounded-2xl border border-border p-3 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-display text-[17px] font-semibold">Options</h3>
-            {meal.locked && <span className="text-[12.5px] text-muted-foreground">Locked. Unlock to change it.</span>}
+            {meal.locked ? (
+              <span className="text-[12.5px] text-muted-foreground">Locked. Unlock to change it.</span>
+            ) : slot === "dinner" && (meal.extra_for_lunchbox || meal.extra_for_car_dinner) ? (
+              <span className="text-[12.5px] text-muted-foreground">Changing this also updates the lunchbox or car dinner made from it.</span>
+            ) : null}
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             <OptionCard meal={meal} chosen />
@@ -131,8 +135,12 @@ export function RecipeDialog({
           <Stat icon={<Users className="size-4" />} label="Serves" value={recipe ? String(recipe.serves) : loading ? "…" : "-"} />
         </div>
 
-        {(recipe?.effort_note || total > 0 || meal.source !== "fresh") && (
+        {(recipe?.effort_note || total > 0 || meal.source !== "fresh" || meal.protein) && (
           <div className="flex flex-wrap gap-1.5">
+            {meal.protein && <Pill>{PROTEIN_LABELS[meal.protein]}</Pill>}
+            {sourceDinnerDate(date, meal) && (
+              <Pill>Made from {DAY_FULL[weekdayIndex(sourceDinnerDate(date, meal)!)]}&apos;s dinner</Pill>
+            )}
             {meal.source && meal.source !== "fresh" && (
               <Pill>
                 {meal.source === "cook_morning" && <Sunrise className="size-3.5" />}
@@ -142,6 +150,7 @@ export function RecipeDialog({
             )}
             {total > 0 && <Pill><Clock className="size-3.5" /> {total} min in total</Pill>}
             {meal.extra_for_lunchbox && <Pill>Make extra for lunchboxes</Pill>}
+            {meal.extra_for_car_dinner && <Pill>Extra portion for the car dinner</Pill>}
             {meal.freeze_portions ? <Pill>Cook double · freeze {meal.freeze_portions}</Pill> : null}
           </div>
         )}
@@ -251,6 +260,7 @@ function OptionCard({ meal, chosen = false, disabled, onChoose }: {
         {[
           meal.cook_minutes ? `${meal.cook_minutes} min` : null,
           meal.effort ? EFFORT_LABEL[meal.effort] : null,
+          meal.protein ? PROTEIN_LABELS[meal.protein] : null,
           meal.source && meal.source !== "fresh" ? SOURCE_LABELS[meal.source] : null,
         ].filter(Boolean).join(" · ")}
       </p>

@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { toast } from "sonner"
 import {
   Sparkles, Lock, LockOpen, RefreshCw, Pencil, Check, X, Loader2, Snowflake, Sunrise,
-  ShoppingCart, ChefHat, BookmarkPlus, CircleCheck, Clock, BookOpen,
+  ShoppingCart, ChefHat, BookmarkPlus, CircleCheck, Clock, BookOpen, CornerDownRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,7 +14,8 @@ import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { useRealtimeChannel } from "@/lib/use-realtime"
 import {
-  buildShoppingList, shoppingItemLabel, weekdayIndex, addDaysStr,
+  buildShoppingList, shoppingItemLabel, weekdayIndex, addDaysStr, weekBalance, linkDinnerFlags, sourceDinnerDate,
+  PROTEIN_LABELS, MEAT_FREE, type Protein, type PlannerSettings,
   SLOT_LABELS, SOURCE_LABELS, LUNCH_KIND_LABELS, SCHOOL_LUNCH_TITLE,
   type MealPlanRow, type PlanDay, type PlannedMeal, type SlotKey, type WeekPlan, type FreezerItem, type RecipeDetail,
 } from "@/lib/meal-planner"
@@ -37,12 +38,15 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
   const [instructions, setInstructions] = useState("")
   const [showShopping, setShowShopping] = useState(false)
   const [openMeal, setOpenMeal]   = useState<{ date: string; slot: SlotKey } | null>(null)
+  const [settings, setSettings]   = useState<Pick<PlannerSettings, "veg_dinners_per_week" | "max_same_protein"> | null>(null)
 
   const fetchData = useCallback(async () => {
-    const [planRes, frzRes] = await Promise.all([
+    const [planRes, frzRes, setRes] = await Promise.all([
       supabase.from("meal_plans").select("*").eq("week_start", weekStart).maybeSingle(),
       supabase.from("freezer_items").select("*").order("frozen_on"),
+      supabase.from("meal_planner_settings").select("*").limit(1).maybeSingle(),
     ])
+    setSettings((setRes.data as PlannerSettings | null) ?? null)
     setRow((planRes.data as MealPlanRow | null) ?? null)
     setFreezer((frzRes.data ?? []) as FreezerItem[])
     setLoading(false)
@@ -53,6 +57,11 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
 
   const plan = row?.plan ?? null
   const shopping = useMemo(() => (plan ? buildShoppingList(plan) : []), [plan])
+  const balance  = useMemo(() => plan ? weekBalance(plan, {
+    vegTarget: settings?.veg_dinners_per_week,
+    maxSame: settings?.max_same_protein,
+    freezerHasItems: freezer.some((f) => f.portions > 0),
+  }) : null, [plan, settings, freezer])
 
   // ── Server actions ─────────────────────────────────────────────────────────
 
@@ -104,6 +113,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Something went wrong")
       setRow(data.plan)
+      if (data.changed?.length) toast.success(`Also updated to match: ${data.changed.join(", ")}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't choose that option")
     } finally {
@@ -135,21 +145,45 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
 
   // ── Local edits (saved straight to the plan) ───────────────────────────────
 
-  async function savePlan(next: WeekPlan) {
-    if (!row) return
-    const prev = row
-    setRow({ ...row, plan: next })
-    const { error } = await supabase.from("meal_plans").update({ plan: next }).eq("id", row.id)
-    if (error) { setRow(prev); toast.error("Couldn't save the change") }
+  async function savePlan(next: WeekPlan): Promise<boolean> {
+    if (!row) return false
+    const prev   = row
+    const linked = linkDinnerFlags(next)
+    setRow({ ...row, plan: linked })
+    const { error } = await supabase.from("meal_plans").update({ plan: linked }).eq("id", row.id)
+    if (error) { setRow(prev); toast.error("Couldn't save the change"); return false }
+    return true
   }
 
-  function updateMeal(date: string, slot: SlotKey, patch: Partial<PlannedMeal>) {
+  async function updateMeal(date: string, slot: SlotKey, patch: Partial<PlannedMeal>) {
     if (!plan) return
+    const titleChanged = patch.title !== undefined && patch.title !== plan.days.find((d) => d.date === date)?.[slot]?.title
     const days = plan.days.map((d) => {
       if (d.date !== date || !d[slot]) return d
       return { ...d, [slot]: { ...d[slot]!, ...patch } } as PlanDay
     })
-    savePlan({ ...plan, days })
+    const saved = await savePlan({ ...plan, days })
+    // A dinner typed in by hand: bring its lunchbox / car dinner into line
+    if (saved && slot === "dinner" && titleChanged) syncLinked(date)
+  }
+
+  async function syncLinked(date: string) {
+    setBusySlot(`${date}|dinner`)
+    try {
+      const res  = await fetch("/api/meal-plan/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekStart, date }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Something went wrong")
+      setRow(data.plan)
+      if (data.changed?.length) toast.success(`Also updated to match: ${data.changed.join(", ")}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't update the linked meals")
+    } finally {
+      setBusySlot(null)
+    }
   }
 
   async function freezeExtra(date: string, meal: PlannedMeal) {
@@ -277,6 +311,29 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
           </Button>
         </div>
       </div>
+
+      {/* ── Week balance ─────────────────────────────────────────────── */}
+      {balance && balance.counts.length > 0 && (
+        <div className="rounded-[20px] bg-card border border-border px-4 py-3 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mr-1">Dinners this week</span>
+            {balance.counts.map(({ protein, count }) => (
+              <ProteinChip key={protein} protein={protein} count={count} />
+            ))}
+            <span className={cn(
+              "ml-auto text-[13px] font-semibold",
+              balance.meatFree >= balance.vegTarget ? "text-primary" : "text-amber-700 dark:text-amber-300",
+            )}>
+              {balance.meatFree} of {balance.vegTarget} vegetarian
+            </span>
+          </div>
+          {balance.warnings.length > 0 && (
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-amber-800 dark:text-amber-200">
+              {balance.warnings.map((w) => <li key={w}>• {w}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* ── Defrost reminder ─────────────────────────────────────────────── */}
       {defrost.length > 0 && (
@@ -439,6 +496,7 @@ function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
                 <div key={day.date} className="flex min-w-0">
                   {meal ? (
                     <PlanCell
+                      date={day.date}
                       slot={slot}
                       meal={meal}
                       lunchKind={slot === "lunchbox" ? day.lunchbox?.kind : undefined}
@@ -460,7 +518,8 @@ function PlanGrid({ plan, todayStr, freezer, busySlot, onUpdate, onOpen }: {
   )
 }
 
-function PlanCell({ slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: {
+function PlanCell({ date, slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: {
+  date: string
   slot: SlotKey
   meal: PlannedMeal
   lunchKind?: string
@@ -473,6 +532,7 @@ function PlanCell({ slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: 
   const isDinner = slot === "dinner"
   const style    = SLOT_STYLES[slot]
   const options  = (meal.alternatives?.length ?? 0) + 1
+  const linkedFrom = linkedLabel(date, meal)
 
   if (isSchool) {
     return (
@@ -505,15 +565,18 @@ function PlanCell({ slot, meal, lunchKind, inFreezer, busy, onUpdate, onOpen }: 
       </div>
       <p className="font-semibold text-[13.5px] leading-snug line-clamp-3 pr-7 break-words">{meal.title}</p>
       <div className="flex flex-wrap gap-1 mt-auto">
+        {slot === "dinner" && meal.protein && <ProteinChip protein={meal.protein} small onPrimary />}
+        {linkedFrom && <Chip onPrimary={isDinner}><CornerDownRight className="size-3" />{linkedFrom}</Chip>}
         {slot === "lunchbox" && lunchKind && (
           <Chip onPrimary={isDinner}>{lunchKind === "hot" ? "Hot" : "Cold"}</Chip>
         )}
         {meal.source === "cook_morning" && <Chip onPrimary={isDinner}><Sunrise className="size-3" />Morning</Chip>}
         {meal.source === "freezer" && <Chip onPrimary={isDinner}><Snowflake className="size-3" />{inFreezer ? "Freezer" : "Not in freezer"}</Chip>}
         {meal.source === "batch" && <Chip onPrimary={isDinner}><ChefHat className="size-3" />Batch</Chip>}
-        {meal.source === "leftovers" && <Chip onPrimary={isDinner}>Leftovers</Chip>}
-        {meal.cook_minutes ? <Chip onPrimary={isDinner}><Clock className="size-3" />{meal.cook_minutes}m</Chip> : null}
+        {meal.source === "leftovers" && !linkedFrom && <Chip onPrimary={isDinner}>Leftovers</Chip>}
+        {meal.cook_minutes && meal.source !== "leftovers" ? <Chip onPrimary={isDinner}><Clock className="size-3" />{meal.cook_minutes}m</Chip> : null}
         {meal.extra_for_lunchbox && <Chip onPrimary={isDinner}>+ lunchbox</Chip>}
+        {meal.extra_for_car_dinner && <Chip onPrimary={isDinner}>+ car</Chip>}
         {meal.freeze_portions ? <Chip onPrimary={isDinner}><Snowflake className="size-3" />×2</Chip> : null}
         {options > 1 && <Chip onPrimary={isDinner}>{options} options</Chip>}
       </div>
@@ -570,6 +633,7 @@ function DayCard({
         return (
           <MealCard
             key={slot}
+            date={day.date}
             slot={slot}
             meal={meal}
             lunchKind={slot === "lunchbox" ? day.lunchbox?.kind : undefined}
@@ -589,8 +653,9 @@ function DayCard({
 // ── Meal card ──────────────────────────────────────────────────────────────────
 
 function MealCard({
-  slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen,
+  date, slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen,
 }: {
+  date: string
   slot: SlotKey
   meal: PlannedMeal
   lunchKind?: string
@@ -679,7 +744,10 @@ function MealCard({
           {meal.cook_minutes ? (
             <Chip onPrimary={isDinner}><Clock className="size-3" />{meal.cook_minutes} min{meal.effort ? ` · ${meal.effort}` : ""}</Chip>
           ) : null}
+          {slot === "dinner" && meal.protein && <ProteinChip protein={meal.protein} small onPrimary />}
+          {linkedLabel(date, meal) && <Chip onPrimary={isDinner}><CornerDownRight className="size-3" />{linkedLabel(date, meal)}</Chip>}
           {meal.extra_for_lunchbox && <Chip onPrimary={isDinner}>Make extra for lunchboxes</Chip>}
+          {meal.extra_for_car_dinner && <Chip onPrimary={isDinner}>Extra portion for car dinner</Chip>}
           {meal.freeze_portions ? <Chip onPrimary={isDinner}>Cook double · freeze {meal.freeze_portions}</Chip> : null}
           {meal.source === "freezer" && !freezerItem && <Chip onPrimary={isDinner}>Not in freezer any more</Chip>}
         </div>
@@ -752,5 +820,35 @@ function SmallAction({ children, onClick, onPrimary }: { children: React.ReactNo
     >
       {children}
     </button>
+  )
+}
+
+function linkedLabel(date: string, meal: PlannedMeal): string | null {
+  const from = sourceDinnerDate(date, meal)
+  if (!from) return null
+  return `From ${DAY_LABELS[weekdayIndex(from)]} dinner`
+}
+
+const PROTEIN_DOT: Record<Protein, string> = {
+  chicken: "bg-amber-400", beef: "bg-red-700", pork: "bg-pink-400", lamb: "bg-orange-700",
+  fish: "bg-sky-500", seafood: "bg-cyan-500", vegetarian: "bg-green-500", vegan: "bg-lime-500",
+  eggs: "bg-yellow-300", mixed: "bg-stone-400",
+}
+
+export function ProteinChip({ protein, count, small = false, onPrimary = false }: {
+  protein: Protein; count?: number; small?: boolean; onPrimary?: boolean
+}) {
+  const meatFree = MEAT_FREE.includes(protein)
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1.5 rounded-full font-medium",
+      small ? "px-2 py-0.5 text-[11.5px]" : "px-2.5 py-1 text-[13px]",
+      small ? (onPrimary ? "bg-white/15" : "bg-black/5 dark:bg-white/10") : "bg-secondary text-secondary-foreground",
+      !small && meatFree && "bg-green-100 text-green-900 dark:bg-green-900/40 dark:text-green-100",
+    )}>
+      <span className={cn("size-2 rounded-full", PROTEIN_DOT[protein])} />
+      {PROTEIN_LABELS[protein]}
+      {count !== undefined && <span className="tabular-nums opacity-70">×{count}</span>}
+    </span>
   )
 }

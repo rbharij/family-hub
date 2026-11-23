@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
   addDaysStr, weekDates, weekdayIndex, daysBetween, buildShoppingList, shoppingItemLabel,
-  SCHOOL_LUNCH_TITLE, FREEZER_OLD_DAYS,
+  SCHOOL_LUNCH_TITLE, FREEZER_OLD_DAYS, DEFAULT_VEG_DINNERS, DEFAULT_MAX_SAME_PROTEIN, PROTEINS,
+  linkDinnerFlags, dependentsOf,
   type WeekPlan, type PlanDay, type PlannedMeal, type PlannedLunchbox, type PlannerSettings, type RecipeDetail,
   type FreezerItem, type MealPlanRow, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
@@ -270,30 +271,44 @@ How to work out time and effort each day:
 Batch cooking and the freezer:
 - If there is a quiet stretch of 2+ hours (often a weekend day) and the freezer is low or the week is busy, plan one batch_session with 1-3 dishes that freeze well. Give portions_to_freeze per dish. Later busy days may use those portions (source "batch").
 - Otherwise set batch_session to null, and for 1-2 freezable dinners on calmer days set freeze_portions to suggest cooking double.
+- If the freezer has anything in it, use it: put freezer meals on WEEKDAYS (Monday to Friday), ideally the busiest evenings. Never put a freezer meal on Saturday or Sunday.
 - Use freezer items marked OLD first. Never use more portions than are in the freezer.
 
-Lunchboxes (one lunchbox, the same for all the children):
-- HOT days: the previous evening's dinner should be something that reheats well in a food flask; set extra_for_lunchbox=true on that dinner and make the lunchbox "<dish> (leftovers, food flask)" with source "leftovers".
-- COLD days: use leftovers that are good cold where the previous dinner suits it (source "leftovers"); otherwise suggest a simple cold lunchbox with ingredients.
+Lunchboxes and car dinners come from dinner wherever possible (one lunchbox, the same for all the children):
+- A lunchbox is ideally made from the PREVIOUS evening's dinner: plain leftovers (source "leftovers") or a slight variation, e.g. roast chicken becomes chicken pasta salad (source "variation", list only the extra ingredients). Set based_on "previous_day".
+- HOT days: the previous dinner should reheat well in a food flask; set extra_for_lunchbox=true on that dinner.
+- COLD days: use leftovers that are good cold, or a cold variation; set extra_for_lunchbox=true on that dinner. Only if the previous dinner really does not suit, suggest a simple cold lunchbox with ingredients and set based_on null.
 - Monday relies on last Sunday's dinner, which is outside this plan; use it only if it is given.
 - School-provided days and days with no lunchbox: set lunchbox to null.
-
-Car dinners: only on days that need one. Portable, easy to eat with hands or one fork in a moving car, not messy, fine at room temperature or kept warm. It can be a portion of that day's dinner if the dinner is ready in time.
+- Car dinners (only on days that need one) are ideally a portion or a portable twist on that day's dinner (based_on "same_day", set extra_for_car_dinner=true on the dinner) or on the previous day's dinner (based_on "previous_day"), e.g. curry becomes a curry wrap. Portable, easy to eat with hands or one fork in a moving car, not messy.
+- Choose dinners with this in mind: on days before a HOT lunchbox, favour dishes that keep and reheat well.
 
 Home lunches: only on days that need one; otherwise null.
 
 Variety and preferences:
 - Respect every dislike and dietary need. Lean towards stated likes.
-- Do not repeat any dinner from the recent list, and no repeats within the week apart from leftovers. Mix proteins and cuisines.
+- Do not repeat any dinner from the recent list, and no repeats within the week apart from leftovers.
+- Balance the week: meet the vegetarian target given below, vary the meats (chicken, beef, pork, lamb, fish, seafood), never the same meat two nights running, and no meat more often than the maximum given. Mix cuisines too.
+- Set protein on every meal (its main protein; "vegetarian" for meat-free, "mixed" only when there is genuinely no main one).
 - Fixed favourite dinners go on their day as given (source "favourite").
 - Keep LOCKED meals exactly as they are.
 - Any meal is allowed; the family's saved recipes are listed in case they fit.
 
 Ingredients: for each meal cooked from scratch, list ingredients with realistic quantities for this household (metric). Leave out basic store-cupboard items (salt, pepper, cooking oil, common dried spices) and anything the household notes say is always stocked. No ingredients for freezer, batch or leftover meals.
 
-Choices: for every dinner that is not LOCKED or a fixed favourite, also give 2 alternatives in "alternatives" that suit the same day just as well (title, short note, source, cook_minutes, effort; no ingredients). Make the three clearly different from each other, e.g. a different protein or cuisine.
+Choices: for every dinner that is not LOCKED or a fixed favourite, also give 2 alternatives in "alternatives" that suit the same day just as well (title, short note, source, cook_minutes, effort, protein; no ingredients). Make the three clearly different from each other, e.g. a different protein or cuisine, while keeping the week balanced.
 
 Keep notes short (under 15 words). Return the plan with the submit_week_plan tool.`
+
+function describeBalance(ctx: PlannerContext): string {
+  const veg = ctx.settings.veg_dinners_per_week ?? DEFAULT_VEG_DINNERS
+  const max = ctx.settings.max_same_protein ?? DEFAULT_MAX_SAME_PROTEIN
+  return [
+    `At least ${veg} vegetarian dinner${veg === 1 ? "" : "s"} this week.`,
+    `No single meat more than ${max} time${max === 1 ? "" : "s"} this week, and never the same meat two nights running.`,
+    ctx.freezer.length ? "The freezer has meals in it: use at least one on a weekday." : "",
+  ].filter(Boolean).join("\n")
+}
 
 function buildUserPrompt(ctx: PlannerContext, locked: LockedMap, extra?: string): string {
   const parts = [
@@ -305,6 +320,7 @@ function buildUserPrompt(ctx: PlannerContext, locked: LockedMap, extra?: string)
   if (ctx.recipes.length) {
     parts.push("## Saved family recipes", ctx.recipes.slice(0, 80).map((r) => r.tags.length ? `${r.title} [${r.tags.join(", ")}]` : r.title).join("; "))
   }
+  parts.push("## Balance targets", describeBalance(ctx))
   parts.push("## The week", ctx.dates.map((d) => describeDay(ctx, d, locked)).join("\n\n"))
   if (extra) parts.push("## Extra instructions", extra)
   return parts.join("\n\n")
@@ -324,17 +340,20 @@ const INGREDIENTS_SCHEMA = {
 const MEAL_PROPS = {
   title:              { type: "string" },
   notes:              { type: "string" },
-  source:             { type: "string", enum: ["fresh", "cook_morning", "freezer", "batch", "leftovers", "favourite"] },
+  source:             { type: "string", enum: ["fresh", "cook_morning", "freezer", "batch", "leftovers", "variation", "favourite"] },
+  protein:            { type: "string", enum: ["chicken", "beef", "pork", "lamb", "fish", "seafood", "vegetarian", "vegan", "eggs", "mixed"] },
+  based_on:           { type: ["string", "null"], enum: ["same_day", "previous_day", null] },
   cook_minutes:       { type: "integer" },
   effort:             { type: "string", enum: ["easy", "medium", "ambitious"] },
   ingredients:        INGREDIENTS_SCHEMA,
   freezer_item_id:    { type: "string" },
   freezer_portions:   { type: "integer" },
   extra_for_lunchbox: { type: "boolean" },
+  extra_for_car_dinner: { type: "boolean" },
   freeze_portions:    { type: "integer" },
 }
 
-const MEAL_SCHEMA = { type: ["object", "null"], properties: MEAL_PROPS, required: ["title", "source"] }
+const MEAL_SCHEMA = { type: ["object", "null"], properties: MEAL_PROPS, required: ["title", "source", "protein"] }
 
 /** Light alternative: enough to choose from; full details are filled in when chosen */
 const ALT_SCHEMA = {
@@ -345,14 +364,15 @@ const ALT_SCHEMA = {
     source:       MEAL_PROPS.source,
     cook_minutes: { type: "integer" },
     effort:       MEAL_PROPS.effort,
+    protein:      MEAL_PROPS.protein,
   },
-  required: ["title", "source"],
+  required: ["title", "source", "protein"],
 }
 
 const DINNER_SCHEMA = {
   type: ["object", "null"],
   properties: { ...MEAL_PROPS, alternatives: { type: "array", items: ALT_SCHEMA, maxItems: 2 } },
-  required: ["title", "source", "alternatives"],
+  required: ["title", "source", "protein", "alternatives"],
 }
 
 const WEEK_TOOL = {
@@ -478,6 +498,9 @@ function cleanMeal(raw: PlannedMeal | null | undefined, ctx: PlannerContext): Pl
     effort: raw.effort ?? null,
     ingredients: (raw.ingredients ?? []).filter((i) => i?.name?.trim()),
     extra_for_lunchbox: Boolean(raw.extra_for_lunchbox),
+    extra_for_car_dinner: Boolean(raw.extra_for_car_dinner),
+    protein: raw.protein && PROTEINS.includes(raw.protein) ? raw.protein : null,
+    based_on: raw.based_on === "same_day" || raw.based_on === "previous_day" ? raw.based_on : null,
     freeze_portions: raw.freeze_portions && raw.freeze_portions > 0 ? raw.freeze_portions : null,
   }
   if (raw.alternatives?.length) {
@@ -569,7 +592,7 @@ export async function generatePlan(
     }
   }
 
-  const plan: WeekPlan = { summary: raw.summary?.trim() || null, days, batch_session: batch }
+  const plan: WeekPlan = linkDinnerFlags({ summary: raw.summary?.trim() || null, days, batch_session: batch })
 
   const { data, error } = await supabase
     .from("meal_plans")
@@ -583,9 +606,96 @@ export async function generatePlan(
 function planSummaryLines(plan: WeekPlan): string {
   return plan.days.map((d) => {
     const bits = (["dinner", "lunch", "lunchbox", "car_dinner"] as SlotKey[])
-      .map((s) => d[s] ? `${s}: ${d[s]!.title}` : null).filter(Boolean)
+      .map((s) => d[s] ? `${s}: ${d[s]!.title}${s === "dinner" && d[s]!.protein ? ` [${d[s]!.protein}]` : ""}` : null).filter(Boolean)
     return `${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}: ${bits.join("; ")}`
   }).join("\n")
+}
+
+async function savePlan(supabase: SupabaseClient, planId: string, plan: WeekPlan): Promise<MealPlanRow> {
+  const { data, error } = await supabase
+    .from("meal_plans")
+    .update({ plan: linkDinnerFlags(plan) })
+    .eq("id", planId)
+    .select("*")
+    .single()
+  if (error) throw new Error(`Could not save the plan: ${error.message}`)
+  return data as MealPlanRow
+}
+
+// ── Keeping lunchboxes and car dinners in step with dinner ────────────────────
+
+const SYNC_TOOL = {
+  name: "submit_updates",
+  description: "Submit the updated lunchbox and car dinner meals.",
+  input_schema: {
+    type: "object",
+    properties: {
+      lunchbox_next_day:   MEAL_SCHEMA,
+      car_dinner_same_day: MEAL_SCHEMA,
+      car_dinner_next_day: MEAL_SCHEMA,
+    },
+  },
+}
+
+/**
+ * After a dinner changes, rewrite the lunchbox / car dinner made from it so
+ * they stay in step. Returns the updated plan and a list of what changed.
+ */
+async function syncDependents(
+  ctx: PlannerContext, plan: WeekPlan, dinnerDate: string,
+): Promise<{ plan: WeekPlan; changed: string[] }> {
+  const deps   = dependentsOf(linkDinnerFlags(plan), dinnerDate)
+  const dinner = plan.days.find((d) => d.date === dinnerDate)?.dinner
+  if (!deps.length || !dinner) return { plan, changed: [] }
+
+  const next = addDaysStr(dinnerDate, 1)
+  const wanted = deps.map((d) =>
+    d.slot === "lunchbox" ? `lunchbox_next_day: the ${lunchKindFor(ctx, d.date).toUpperCase()} lunchbox on ${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}`
+    : d.date === dinnerDate ? `car_dinner_same_day: the car dinner on ${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}`
+    : `car_dinner_next_day: the car dinner on ${DAY_NAMES[weekdayIndex(d.date)]} ${d.date}`)
+
+  const extra = [
+    `The current plan for the week is:\n${planSummaryLines(plan)}`,
+    `The dinner on ${DAY_NAMES[weekdayIndex(dinnerDate)]} ${dinnerDate} has changed to "${dinner.title}"${dinner.notes ? ` (${dinner.notes})` : ""}.`,
+    `Rewrite only these so they stay in step with the new dinner:\n- ${wanted.join("\n- ")}`,
+    "Make each one from the new dinner where it suits: plain leftovers (source \"leftovers\") or a slight variation (source \"variation\", list only the extra ingredients).",
+    `Set based_on to "previous_day" for the lunchbox and for a car dinner on ${next}, and "same_day" for a car dinner on ${dinnerDate}.`,
+    "Hot lunchboxes must reheat well in a food flask, cold ones must be good cold, car dinners must be portable. If the new dinner really does not suit, suggest a simple alternative with ingredients and set based_on null.",
+    "Return them with the submit_updates tool.",
+  ].join("\n")
+
+  const user = buildUserPrompt(ctx, collectLocked(ctx, false), extra)
+  const raw  = await callClaude<{ lunchbox_next_day?: PlannedMeal | null; car_dinner_same_day?: PlannedMeal | null; car_dinner_next_day?: PlannedMeal | null }>(
+    user, SYNC_TOOL, 2500,
+  )
+
+  const changed: string[] = []
+  const days = plan.days.map((d) => ({ ...d }))
+  for (const dep of deps) {
+    const key = dep.slot === "lunchbox" ? "lunchbox_next_day" : dep.date === dinnerDate ? "car_dinner_same_day" : "car_dinner_next_day"
+    const meal = cleanMeal(raw[key] ?? null, ctx)
+    if (!meal) continue
+    const day = days.find((x) => x.date === dep.date)!
+    if (dep.slot === "lunchbox") {
+      const kind = lunchKindFor(ctx, dep.date)
+      day.lunchbox = { ...meal, kind: kind === "hot" || kind === "cold" ? kind : (day.lunchbox?.kind ?? "cold") }
+    } else {
+      day.car_dinner = meal
+    }
+    changed.push(`${DAY_NAMES[weekdayIndex(dep.date)].slice(0, 3)} ${dep.slot === "lunchbox" ? "lunchbox" : "car dinner"}`)
+  }
+  return { plan: linkDinnerFlags({ ...plan, days }), changed }
+}
+
+/** Called after a dinner is typed in by hand, so its lunchbox / car dinner follow. */
+export async function syncAfterDinnerChange(
+  supabase: SupabaseClient, weekStart: string, dinnerDate: string,
+): Promise<{ row: MealPlanRow; changed: string[] }> {
+  const ctx = await loadContext(supabase, weekStart)
+  if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
+  const { plan, changed } = await syncDependents(ctx, ctx.existingPlan.plan, dinnerDate)
+  const row = await savePlan(supabase, ctx.existingPlan.id, plan)
+  return { row, changed }
 }
 
 async function savePlanDay(
@@ -596,14 +706,7 @@ async function savePlanDay(
     if (slot === "lunchbox") return { ...d, lunchbox: { ...meal, kind: kind ?? d.lunchbox?.kind ?? "cold" } }
     return { ...d, [slot]: meal }
   })
-  const { data, error } = await supabase
-    .from("meal_plans")
-    .update({ plan: { ...plan, days } })
-    .eq("id", planId)
-    .select("*")
-    .single()
-  if (error) throw new Error(`Could not save the plan: ${error.message}`)
-  return data as MealPlanRow
+  return savePlan(supabase, planId, { ...plan, days })
 }
 
 /**
@@ -629,7 +732,9 @@ export async function optionsFor(
     `The current plan for the week is:\n${planSummaryLines(plan)}`,
     `Give 3 different options for the ${slot.replace("_", " ")} on ${DAY_NAMES[weekdayIndex(date)]} ${date}.`,
     `Do not suggest any of these: ${avoid.join(", ")}. Make the three clearly different from each other and from the rest of the week.`,
-    "Each option must suit that day's time available and follow all the household rules. Include ingredients for each.",
+    "Each option must suit that day's time available and follow all the household rules, including the balance targets (count the other dinners above). Set protein on each. Include ingredients for each.",
+    slot === "dinner" ? "Where the next day has a lunchbox or car dinner made from this dinner, favour options that leave good leftovers for it." : "",
+    slot === "lunchbox" || slot === "car_dinner" ? "Where it suits, make the options from the dinner they follow (leftovers or a slight variation) and set based_on." : "",
     slot === "lunchbox" ? `This is a ${lunchKindFor(ctx, date).toUpperCase()} lunchbox day.` : "",
     hint ? `The family asked for: ${hint}` : "",
     "Return them with the submit_options tool.",
@@ -657,7 +762,7 @@ export async function chooseOption(
   date: string,
   slot: SlotKey,
   index: number,
-): Promise<MealPlanRow> {
+): Promise<{ row: MealPlanRow; changed: string[] }> {
   const ctx = await loadContext(supabase, weekStart)
   if (!ctx.existingPlan) throw new Error("There is no plan for this week yet")
   const plan    = ctx.existingPlan.plan
@@ -691,7 +796,21 @@ export async function chooseOption(
     locked: current.locked,
     alternatives: [{ ...previous, incomplete: false }, ...others],
   }
-  return savePlanDay(supabase, ctx.existingPlan.id, plan, date, slot, next)
+
+  const days = plan.days.map((d) => {
+    if (d.date !== date) return d
+    if (slot === "lunchbox") return { ...d, lunchbox: { ...next, kind: d.lunchbox?.kind ?? "cold" } }
+    return { ...d, [slot]: next }
+  })
+  let updated: WeekPlan = { ...plan, days }
+  let changed: string[] = []
+  if (slot === "dinner") {
+    const synced = await syncDependents(ctx, updated, date)
+    updated = synced.plan
+    changed = synced.changed
+  }
+  const row = await savePlan(supabase, ctx.existingPlan.id, updated)
+  return { row, changed }
 }
 
 /**
@@ -738,6 +857,9 @@ export async function confirmPlan(
     if (m.source === "freezer") bits.push("From the freezer")
     if (m.source === "batch") bits.push("From batch cook")
     if (m.extra_for_lunchbox) bits.push("Make extra for lunchboxes")
+    if (m.extra_for_car_dinner) bits.push("Make an extra portion for the car dinner")
+    if (m.source === "leftovers") bits.push("Leftovers")
+    if (m.source === "variation") bits.push("Twist on dinner")
     if (m.freeze_portions) bits.push(`Cook double, freeze ${m.freeze_portions}`)
     if (m.notes) bits.push(m.notes)
     return bits.length ? bits.join(". ") : null
@@ -865,13 +987,15 @@ export async function getRecipe(
     slot === "car_dinner" ? 1
     : slot === "lunchbox" ? Math.max(1, people.filter((p) => p.is_child).length)
     : (meal.freezer_portions ?? people.length) || 4
-  const extraServes = slot === "dinner" && meal.extra_for_lunchbox ? people.filter((p) => p.is_child).length : 0
+  const extraServes = slot === "dinner"
+    ? (meal.extra_for_lunchbox ? people.filter((p) => p.is_child).length : 0) + (meal.extra_for_car_dinner ? 1 : 0)
+    : 0
 
   const lines = [
     `Meal: ${meal.title}`,
     `Slot: ${slot.replace("_", " ")}${slot === "lunchbox" && day.lunchbox ? ` (${day.lunchbox.kind})` : ""} on ${DAY_NAMES[weekdayIndex(date)]}`,
     `Source: ${meal.source ?? "fresh"}`,
-    `Serves: ${serves}${extraServes ? `, plus ${extraServes} extra portions for the next day's lunchboxes` : ""}${meal.freeze_portions ? `, plus ${meal.freeze_portions} portions to freeze (cook double)` : ""}`,
+    `Serves: ${serves}${extraServes ? `, plus ${extraServes} extra portion${extraServes === 1 ? "" : "s"} for lunchboxes or the car dinner` : ""}${meal.freeze_portions ? `, plus ${meal.freeze_portions} portions to freeze (cook double)` : ""}`,
     meal.cook_minutes ? `Planned time: about ${meal.cook_minutes} minutes, ${meal.effort ?? "easy"}` : "",
     meal.notes ? `Planner notes: ${meal.notes}` : "",
     meal.ingredients?.length ? `Ingredients already chosen: ${meal.ingredients.map((i) => (i.qty ? `${i.name} ${i.qty}` : i.name)).join("; ")}` : "",

@@ -76,6 +76,8 @@ export function SetupView() {
         car_dinner_member_id: rest.car_dinner_member_id,
         lunch_days: rest.lunch_days,
         favourite_slots: rest.favourite_slots.filter((f) => f.title.trim()),
+        veg_dinners_per_week: rest.veg_dinners_per_week ?? 2,
+        max_same_protein: rest.max_same_protein ?? 2,
         household_notes: rest.household_notes?.trim() || null,
         auto_draft: rest.auto_draft,
       }).eq("id", id)
@@ -133,6 +135,30 @@ export function SetupView() {
               </Field>
             </div>
           ))}
+        </div>
+      </Section>
+
+      {/* ── Balance ──────────────────────────────────────────────────── */}
+      <Section title="Week balance" hint="The planner varies the meats, never repeats a meat two nights running, and meets your vegetarian target.">
+        <div className="grid gap-4 sm:grid-cols-2 max-w-xl">
+          <Field label="Vegetarian dinners a week (at least)">
+            <select
+              className={SELECT_CLASS}
+              value={settings.veg_dinners_per_week ?? 2}
+              onChange={(e) => patch({ veg_dinners_per_week: Number(e.target.value) })}
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </Field>
+          <Field label="Most times one meat can appear">
+            <select
+              className={SELECT_CLASS}
+              value={settings.max_same_protein ?? 2}
+              onChange={(e) => patch({ max_same_protein: Number(e.target.value) })}
+            >
+              {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </Field>
         </div>
       </Section>
 
