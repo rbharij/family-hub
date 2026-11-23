@@ -21,6 +21,7 @@ import {
 import { SLOT_STYLES, type SlotKind } from "./_slot-style"
 import { SCHOOL_LUNCH_TITLE } from "@/lib/meal-planner"
 import { MealEditor } from "./_meal-editor"
+import { MealView } from "./_meal-view"
 
 // ── Stable realtime config ─────────────────────────────────────────────────────
 const MEALS_TABLES = [{ table: "meals" }, { table: "member_weekly_plants" }] as const
@@ -166,6 +167,24 @@ export default function MealsPage() {
     setEditForMemberId(forMemberId)
     setEditForMemberName(forMemberName)
     setEditorOpen(true)
+  }
+
+  // Filled meals open the recipe view first; empty slots (and School lunch /
+  // Eating out) go straight to the editor
+  const [viewOpen, setViewOpen] = useState(false)
+  function openSlot(
+    date: string, dayIdx: number, type: MealType, meal: Meal | null,
+    forMemberId: string | null = null, forMemberName: string | null = null,
+  ) {
+    const noRecipe = !meal || ["school lunch", "eating out"].includes(meal.title.trim().toLowerCase())
+    if (noRecipe) { openEditor(date, dayIdx, type, meal, forMemberId, forMemberName); return }
+    setEditDate(date)
+    setEditDayIdx(dayIdx)
+    setEditType(type)
+    setEditingMeal(meal)
+    setEditForMemberId(forMemberId)
+    setEditForMemberName(forMemberName)
+    setViewOpen(true)
   }
 
   function closeEditor() {
@@ -327,7 +346,7 @@ export default function MealsPage() {
               today={today}
               rows={rows}
               dayPlantMap={dayPlantMap}
-              onSlotClick={openEditor}
+              onSlotClick={openSlot}
             />
           )}
         </div>
@@ -380,11 +399,22 @@ export default function MealsPage() {
               isToday={toDateStr(days[mobileDay]) === toDateStr(today)}
               rows={rows}
               dayPlants={dayPlantMap.get(toDateStr(days[mobileDay]))}
-              onSlotClick={openEditor}
+              onSlotClick={openSlot}
             />
           </div>
         </div>
       </ErrorBoundary>
+
+      {/* ── Recipe view ────────────────────────────────────────────────────── */}
+      <MealView
+        open={viewOpen}
+        onClose={() => setViewOpen(false)}
+        meal={editingMeal}
+        dayIndex={editDayIdx}
+        mealType={editType}
+        memberName={editForMemberName}
+        onEdit={() => { setViewOpen(false); setEditorOpen(true) }}
+      />
 
       {/* ── Editor ─────────────────────────────────────────────────────────── */}
       <MealEditor

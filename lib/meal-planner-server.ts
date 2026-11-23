@@ -970,7 +970,7 @@ export async function confirmPlan(
       .map((m) => [`${m.date}|${m.meal_type}|${m.for_member_id ?? ""}`, m.id]),
   )
 
-  type MealWrite = { date: string; meal_type: string; title: string; notes: string | null; for_member_id: string | null; freezer_item_id: string | null }
+  type MealWrite = { date: string; meal_type: string; title: string; notes: string | null; for_member_id: string | null; freezer_item_id: string | null; recipe?: RecipeDetail | null }
   const writes: MealWrite[] = []
   const noteFor = (m: PlannedMeal) => {
     const bits: string[] = []
@@ -1007,11 +1007,26 @@ export async function confirmPlan(
     if (day.car_dinner) writes.push({ date: day.date, meal_type: "car_dinner", title: day.car_dinner.title, notes: noteFor(day.car_dinner), for_member_id: carMemberId, freezer_item_id: day.car_dinner.freezer_item_id ?? null })
   }
 
-  for (const w of writes) {
+  // Carry each meal's recipe across so the Meals page can show it
+  const recipeFor = (date: string, type: string) => {
+    const d = plan.days.find((x) => x.date === date)
+    const m = d?.[type as SlotKey]
+    return m?.recipe ?? null
+  }
+  let recipeColumn = true
+  for (const w0 of writes) {
+    const w: MealWrite = recipeColumn ? { ...w0, recipe: recipeFor(w0.date, w0.meal_type) } : w0
     const id = existingMap.get(`${w.date}|${w.meal_type}|${w.for_member_id ?? ""}`)
-    const res = id
+    let res = id
       ? await supabase.from("meals").update(w).eq("id", id)
       : await supabase.from("meals").insert(w)
+    if (res.error && recipeColumn && /recipe/i.test(res.error.message)) {
+      // The recipe column has not been added yet: save without it
+      recipeColumn = false
+      res = id
+        ? await supabase.from("meals").update(w0).eq("id", id)
+        : await supabase.from("meals").insert(w0)
+    }
     if (res.error) throw new Error(`Could not save ${w.meal_type} on ${w.date}: ${res.error.message}`)
   }
 
@@ -1114,6 +1129,27 @@ export async function getRecipe(
   if (!day || !meal) throw new Error("That meal is not in the plan")
   if (meal.recipe && !refresh) return meal.recipe
 
+  const recipe = await writeRecipe(supabase, meal, date, slot, day.lunchbox?.kind)
+
+  // Re-read just before writing so edits made meanwhile are not lost
+  const { data: fresh } = await supabase.from("meal_plans").select("id, plan").eq("week_start", weekStart).single()
+  const freshPlan = (fresh as { id: string; plan: WeekPlan } | null)?.plan
+  if (fresh && freshPlan) {
+    const days = freshPlan.days.map((d) => {
+      if (d.date !== date || !d[slot] || d[slot]!.title !== meal.title) return d
+      return { ...d, [slot]: { ...d[slot]!, recipe } } as PlanDay
+    })
+    await supabase.from("meal_plans").update({ plan: { ...freshPlan, days } }).eq("id", (fresh as { id: string }).id)
+  }
+  // Keep the Meals page copy in step (if the plan was already confirmed)
+  await saveRecipeToMeals(supabase, date, slot, meal.title, recipe)
+  return recipe
+}
+
+/** Writes a full recipe for one meal with Claude. */
+async function writeRecipe(
+  supabase: SupabaseClient, meal: PlannedMeal, date: string, slot: SlotKey, lunchKind?: string,
+): Promise<RecipeDetail> {
   const { data: members } = await supabase.from("family_members").select("name, is_child, food_dislikes, dietary_needs")
   const people = (members ?? []) as { name: string; is_child: boolean; food_dislikes: string | null; dietary_needs: string | null }[]
   const { data: settings } = await supabase.from("meal_planner_settings").select("household_notes").limit(1).maybeSingle()
@@ -1128,7 +1164,7 @@ export async function getRecipe(
 
   const lines = [
     `Meal: ${meal.title}`,
-    `Slot: ${slot.replace("_", " ")}${slot === "lunchbox" && day.lunchbox ? ` (${day.lunchbox.kind})` : ""} on ${DAY_NAMES[weekdayIndex(date)]}`,
+    `Slot: ${slot.replace("_", " ")}${slot === "lunchbox" && lunchKind ? ` (${lunchKind})` : ""} on ${DAY_NAMES[weekdayIndex(date)]}`,
     `Source: ${meal.source ?? "fresh"}`,
     `Serves: ${serves}${extraServes ? `, plus ${extraServes} extra portion${extraServes === 1 ? "" : "s"} for lunchboxes or the car dinner` : ""}${meal.freeze_portions ? `, plus ${meal.freeze_portions} portions to freeze (cook double)` : ""}`,
     meal.cook_minutes ? `Planned time: about ${meal.cook_minutes} minutes, ${meal.effort ?? "easy"}` : "",
@@ -1157,16 +1193,45 @@ export async function getRecipe(
     tips: (raw.tips ?? []).filter((t) => t?.trim()),
   }
   if (!recipe.steps.length) throw new Error("Claude did not return any steps")
+  return recipe
+}
 
-  // Re-read just before writing so edits made meanwhile are not lost
-  const { data: fresh } = await supabase.from("meal_plans").select("id, plan").eq("week_start", weekStart).single()
-  const freshPlan = (fresh as { id: string; plan: WeekPlan } | null)?.plan
-  if (fresh && freshPlan) {
-    const days = freshPlan.days.map((d) => {
-      if (d.date !== date || !d[slot] || d[slot]!.title !== meal.title) return d
-      return { ...d, [slot]: { ...d[slot]!, recipe } } as PlanDay
-    })
-    await supabase.from("meal_plans").update({ plan: { ...freshPlan, days } }).eq("id", (fresh as { id: string }).id)
+/** Stores a recipe on the Meals page rows for that slot. Ignored if the column is missing. */
+async function saveRecipeToMeals(supabase: SupabaseClient, date: string, slot: string, title: string, recipe: RecipeDetail) {
+  const { error } = await supabase.from("meals").update({ recipe }).eq("date", date).eq("meal_type", slot).eq("title", title)
+  if (error && !/recipe/i.test(error.message)) console.warn("[recipe] could not save to meals:", error.message)
+}
+
+const NO_RECIPE_TITLES = ["school lunch", "eating out"]
+
+/**
+ * Recipe for a meal on the Meals page. Uses (in order) the copy stored on the
+ * meal, the meal plan's recipe, or writes a new one, then stores it.
+ */
+export async function getMealRecipe(supabase: SupabaseClient, mealId: string, refresh = false): Promise<RecipeDetail> {
+  const { data: row, error } = await supabase.from("meals").select("*").eq("id", mealId).single()
+  if (error || !row) throw new Error("That meal could not be found")
+  const m = row as { id: string; date: string; meal_type: SlotKey; title: string; notes: string | null; recipe?: RecipeDetail | null }
+  if (NO_RECIPE_TITLES.includes(m.title.trim().toLowerCase())) throw new Error("There is no recipe for this one")
+  if (m.recipe && !refresh) return m.recipe
+
+  // Planned meal? Use (and cache in) the plan so both views match
+  const weekStart = mondayOf(m.date)
+  const { data: planRow } = await supabase.from("meal_plans").select("plan").eq("week_start", weekStart).maybeSingle()
+  const planned = (planRow as { plan: WeekPlan } | null)?.plan.days.find((d) => d.date === m.date)?.[m.meal_type]
+  if (planned && planned.title === m.title) {
+    return getRecipe(supabase, weekStart, m.date, m.meal_type, refresh)
   }
+
+  // Typed in by hand: write one, following a saved recipe with the same name if there is one
+  const { data: saved } = await supabase.from("recipes").select("id").ilike("title", m.title).limit(1).maybeSingle()
+  const meal: PlannedMeal = {
+    title: m.title,
+    notes: m.notes,
+    source: "fresh",
+    recipe_id: (saved as { id: string } | null)?.id ?? null,
+  }
+  const recipe = await writeRecipe(supabase, meal, m.date, m.meal_type)
+  await saveRecipeToMeals(supabase, m.date, m.meal_type, m.title, recipe)
   return recipe
 }
