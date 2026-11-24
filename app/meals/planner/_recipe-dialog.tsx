@@ -15,7 +15,6 @@ import { DAY_FULL } from "../_utils"
 import { RecipeBody, EFFORT_LABEL } from "../_recipe-body"
 import { createClient } from "@/lib/supabase"
 
-
 export function RecipeDialog({
   open, onClose, weekStart, date, slot, meal, lunchKind, busy, onChoose, onMoreOptions, onToggleLock, onSaveRecipe, onFreeze, onClear, onUseRecipe,
 }: {
@@ -61,21 +60,15 @@ export function RecipeDialog({
     }
   }, [weekStart, date, slot])
 
-  // Use the cached recipe if there is one, otherwise ask Claude to write it.
-  // Re-runs when the meal changes (e.g. after choosing another option).
+  // Show the saved method if there is one. Nothing is written until the
+  // family presses "Write the method". Resets when the meal changes.
   const mealTitle = meal?.title
   const cached    = meal?.recipe ?? null
-  const requested = useRef<string | null>(null)
   useEffect(() => {
-    if (!open) { requested.current = null; return }
-    if (!mealTitle) return
-    if (cached) { setRecipe(cached); setError(null); return }
-    const key = `${date}|${slot}|${mealTitle}`
-    if (requested.current === key) return   // already asked for this meal
-    requested.current = key
-    setRecipe(null)
-    load(false)
-  }, [open, mealTitle, cached, date, slot, load])
+    if (!open || !mealTitle) return
+    setRecipe(cached)
+    setError(null)
+  }, [open, mealTitle, cached])
 
   if (!meal) return null
 
@@ -153,6 +146,7 @@ export function RecipeDialog({
           loading={loading}
           error={error}
           onRetry={() => load(false)}
+          onGenerate={() => load(false)}
           fallback={{ effort: meal.effort, cook_minutes: meal.cook_minutes, ingredients: meal.ingredients }}
         >
           {(recipe?.effort_note || total > 0 || meal.source !== "fresh" || meal.protein) && (
@@ -197,15 +191,15 @@ export function RecipeDialog({
               <Snowflake className="size-4" /> {meal.frozen_done ? "Extra portions frozen" : `Add ${meal.freeze_portions} to freezer`}
             </Button>
           ) : null}
-          <Button variant="outline" className="rounded-xl gap-2" onClick={() => onSaveRecipe(recipe)} disabled={!recipe}>
+          <Button variant="outline" className="rounded-xl gap-2" onClick={() => onSaveRecipe(recipe)} disabled={!recipe && !meal.ingredients?.length}>
             <BookmarkPlus className="size-4" /> Save to recipes
           </Button>
           <Button variant="outline" className="rounded-xl gap-2 text-destructive" onClick={onClear} disabled={busy}>
             <X className="size-4" /> {slot === "dinner" || slot === "lunch" ? "Clear: eating out" : "Clear: not needed"}
           </Button>
-          <Button variant="ghost" className="rounded-xl gap-2 ml-auto text-muted-foreground" onClick={() => load(true)} disabled={loading}>
+          {recipe && <Button variant="ghost" className="rounded-xl gap-2 ml-auto text-muted-foreground" onClick={() => load(true)} disabled={loading}>
             <RefreshCw className="size-4" /> Rewrite recipe
-          </Button>
+          </Button>}
         </div>
       </DialogContent>
     </Dialog>

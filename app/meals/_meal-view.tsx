@@ -7,10 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
-import type { RecipeDetail } from "@/lib/meal-planner"
+import { addDaysStr, weekdayIndex, type RecipeDetail, type SlotKey, type WeekPlan } from "@/lib/meal-planner"
 import { RecipeBody } from "./_recipe-body"
 import { SLOT_STYLES } from "./_slot-style"
 import { DAY_FULL, type Meal, type MealType } from "./_utils"
+
+function mondayOf(dateStr: string) { return addDaysStr(dateStr, -weekdayIndex(dateStr)) }
 
 /**
  * Read-only view of a meal on the Meals page: how to make it, with a button
@@ -50,7 +52,9 @@ export function MealView({ open, onClose, meal, dayIndex, mealType, memberName, 
     }
   }, [meal])
 
-  // Use the stored recipe if there is one; otherwise fetch (or write) it once
+  // Use the stored recipe if there is one; otherwise check (without writing
+  // anything) whether the meal plan already has one. The method is only
+  // written when the family presses "Write the method".
   const key    = meal ? `${meal.id}|${meal.title}` : null
   const stored = meal?.recipe ?? null
   useEffect(() => {
@@ -60,8 +64,16 @@ export function MealView({ open, onClose, meal, dayIndex, mealType, memberName, 
     if (requested.current === key) return
     requested.current = key
     setRecipe(null)
-    load(false)
-  }, [open, key, stored, load])
+    setError(null)
+    // Check the meal plan for a method already written there (no Claude call)
+    const monday = mondayOf(meal!.date)
+    supabase.from("meal_plans").select("plan").eq("week_start", monday).maybeSingle()
+      .then(({ data }) => {
+        const plan = (data as { plan: WeekPlan } | null)?.plan
+        const planned = plan?.days.find((d) => d.date === meal!.date)?.[mealType as SlotKey]
+        if (planned?.title === meal!.title && planned.recipe) setRecipe(planned.recipe)
+      })
+  }, [open, key, stored, meal, mealType, supabase])
 
   async function saveToRecipes() {
     if (!meal || !recipe) return
@@ -91,7 +103,7 @@ export function MealView({ open, onClose, meal, dayIndex, mealType, memberName, 
           <DialogTitle className="font-display text-[26px] font-semibold leading-tight">{meal.title}</DialogTitle>
         </DialogHeader>
 
-        <RecipeBody recipe={recipe} loading={loading} error={error} onRetry={() => load(false)}>
+        <RecipeBody recipe={recipe} loading={loading} error={error} onRetry={() => load(false)} onGenerate={() => load(false)}>
           {meal.notes && <p className="text-[14.5px]">{meal.notes}</p>}
         </RecipeBody>
 
@@ -102,9 +114,11 @@ export function MealView({ open, onClose, meal, dayIndex, mealType, memberName, 
           <Button variant="outline" className="rounded-xl gap-2" onClick={saveToRecipes} disabled={!recipe}>
             <BookmarkPlus className="size-4" /> Save to recipes
           </Button>
-          <Button variant="ghost" className="rounded-xl gap-2 ml-auto text-muted-foreground" onClick={() => load(true)} disabled={loading}>
-            <RefreshCw className="size-4" /> Rewrite recipe
-          </Button>
+          {recipe && (
+            <Button variant="ghost" className="rounded-xl gap-2 ml-auto text-muted-foreground" onClick={() => load(true)} disabled={loading}>
+              <RefreshCw className="size-4" /> Rewrite recipe
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

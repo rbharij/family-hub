@@ -1,6 +1,6 @@
 "use client"
 
-import { Clock, Users, Gauge, Loader2, Lightbulb, ChefHat } from "lucide-react"
+import { Clock, Users, Gauge, Loader2, Lightbulb, ChefHat, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Effort, Ingredient, RecipeDetail } from "@/lib/meal-planner"
 
@@ -11,12 +11,14 @@ export const EFFORT_LABEL: Record<string, string> = { easy: "Easy", medium: "Med
  * then ingredients beside a numbered method and tips.
  */
 export function RecipeBody({
-  recipe, loading, error, onRetry, fallback, children,
+  recipe, loading, error, onRetry, onGenerate, fallback, children,
 }: {
   recipe: RecipeDetail | null
   loading: boolean
   error: string | null
   onRetry: () => void
+  /** Shown as a button when there is no method yet; nothing is written until pressed */
+  onGenerate?: () => void
   /** Shown before the full recipe arrives (from the plan, if any) */
   fallback?: { effort?: Effort | null; cook_minutes?: number | null; ingredients?: Ingredient[] }
   /** Rendered between the stats and the ingredients (pills, notes) */
@@ -43,7 +45,9 @@ export function RecipeBody({
         <section>
           <h3 className="font-display text-[18px] font-semibold mb-2">Ingredients</h3>
           {ingredients.length === 0 ? (
-            <p className="text-muted-foreground text-[14px]">{loading ? "Loading…" : "Nothing to buy for this one."}</p>
+            <p className="text-muted-foreground text-[14px]">
+              {loading ? "Loading…" : !recipe && onGenerate ? "Listed once the method is written." : "Nothing to buy for this one."}
+            </p>
           ) : (
             <ul className="flex flex-col divide-y divide-border text-[14.5px]">
               {ingredients.map((i, idx) => (
@@ -66,6 +70,13 @@ export function RecipeBody({
             <div className="flex flex-col items-start gap-2">
               <p className="text-destructive text-[14px]">{error}</p>
               <Button variant="outline" size="sm" onClick={onRetry}>Try again</Button>
+            </div>
+          ) : !recipe && onGenerate ? (
+            <div className="rounded-2xl border border-dashed border-input px-4 py-4 flex flex-col items-start gap-2">
+              <p className="text-[14px] text-muted-foreground">No method written yet.</p>
+              <Button variant="outline" className="rounded-xl gap-2" onClick={onGenerate}>
+                <Sparkles className="size-4" /> Write the method
+              </Button>
             </div>
           ) : recipe ? (
             <ol className="flex flex-col gap-3">
