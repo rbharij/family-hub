@@ -1,13 +1,13 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import {
-  addDaysStr, weekDates, weekdayIndex, daysBetween, buildShoppingList, shoppingItemLabel,
+  addDaysStr, weekDates, weekdayIndex, daysBetween,
   SCHOOL_LUNCH_TITLE, FREEZER_OLD_DAYS, DEFAULT_VEG_DINNERS, DEFAULT_MAX_SAME_PROTEIN, PROTEINS,
   linkDinnerFlags, dependentsOf, EATING_OUT_TITLE,
   type WeekPlan, type PlanDay, type PlannedMeal, type PlannedLunchbox, type PlannerSettings, type RecipeDetail,
   type FreezerItem, type MealPlanRow, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Config ──────────────────────────────────────────────────────────────────────
 
 const FAMILY_TZ = () => process.env.FAMILY_TIMEZONE ?? "Asia/Singapore"
 const MODEL     = () => process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5"
@@ -30,7 +30,7 @@ export function mondayOf(dateStr: string): string {
   return addDaysStr(dateStr, -weekdayIndex(dateStr))
 }
 
-// ── Context ───────────────────────────────────────────────────────────────────
+// ── Context ─────────────────────────────────────────────────────────────────────
 
 interface Member {
   id: string
@@ -151,7 +151,7 @@ export async function loadContext(supabase: SupabaseClient, weekStart: string): 
   }
 }
 
-// ── Day rules derived from settings ───────────────────────────────────────────
+// ── Day rules derived from settings ───────────────────────────────────────────────
 
 function lunchKindFor(ctx: PlannerContext, date: string): LunchKind {
   const idx = weekdayIndex(date)
@@ -210,7 +210,7 @@ function collectLocked(ctx: PlannerContext, keepLocked: boolean): LockedMap {
   return locked
 }
 
-// ── Prompt ────────────────────────────────────────────────────────────────────
+// ── Prompt ──────────────────────────────────────────────────────────────────────
 
 function describeHousehold(ctx: PlannerContext): string {
   const carMember = ctx.members.find((m) => m.id === ctx.settings.car_dinner_member_id)
@@ -330,7 +330,7 @@ function buildUserPrompt(ctx: PlannerContext, locked: LockedMap, extra?: string)
   return parts.join("\n\n")
 }
 
-// ── Tool schemas ──────────────────────────────────────────────────────────────
+// ── Tool schemas ────────────────────────────────────────────────────────────────
 
 const INGREDIENTS_SCHEMA = {
   type: "array",
@@ -451,7 +451,7 @@ const COMPLETE_TOOL = {
   input_schema: { type: "object", properties: MEAL_PROPS, required: ["title", "source"] },
 }
 
-// ── Claude call ───────────────────────────────────────────────────────────────
+// ── Claude call ──────────────────────────────────────────────────────────────────
 
 async function callClaude<T>(
   user: string,
@@ -935,8 +935,8 @@ export async function applySavedRecipe(
 }
 
 /**
- * Writes the plan into the Meals page, takes freezer portions, and adds
- * missing ingredients to the Groceries shopping list.
+ * Writes the plan into the Meals page and takes freezer portions. It does not
+ * touch the shopping list; that only happens when the family asks.
  */
 export async function confirmPlan(
   supabase: SupabaseClient,
@@ -1056,24 +1056,9 @@ export async function confirmPlan(
     deductions.push({ freezer_item_id: id, portions: take })
   }
 
-  // 4. Shopping list: add anything not already on the Groceries list
-  const { data: lists } = await supabase.from("shopping_lists").select("id, name").order("created_at")
-  const listRows = (lists ?? []) as { id: string; name: string }[]
-  const groceries = listRows.find((l) => l.name.toLowerCase().includes("grocer")) ?? listRows[0]
-  let added = 0
-  if (groceries) {
-    const { data: items } = await supabase.from("shopping_items").select("name").eq("list_id", groceries.id).eq("completed", false)
-    const have = new Set(((items ?? []) as { name: string }[]).map((i) => i.name.trim().toLowerCase()))
-    const toAdd = buildShoppingList(plan)
-      .map(shoppingItemLabel)
-      .filter((label) => !have.has(label.toLowerCase()))
-      .map((name) => ({ list_id: groceries.id, name, quantity: 1 }))
-    if (toAdd.length) {
-      const { error: shopErr } = await supabase.from("shopping_items").insert(toAdd)
-      if (shopErr) throw new Error(`Could not add to the shopping list: ${shopErr.message}`)
-      added = toAdd.length
-    }
-  }
+  // 4. The shopping list is left alone: items are only added when the
+  //    family presses "Add to shopping list" in the planner.
+  const added = 0
 
   // 5. Mark confirmed
   await supabase.from("meal_plans").update({
