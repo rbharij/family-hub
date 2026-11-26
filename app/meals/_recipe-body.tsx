@@ -1,7 +1,11 @@
 "use client"
 
-import { Clock, Users, Gauge, Loader2, Lightbulb, ChefHat, Sparkles } from "lucide-react"
+import { useRef, useState } from "react"
+import { toast } from "sonner"
+import { Clock, Users, Gauge, Loader2, Lightbulb, ChefHat, Sparkles, ShoppingCart } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { createClient } from "@/lib/supabase"
+import { addToGroceries } from "@/lib/shopping"
 import type { Effort, Ingredient, RecipeDetail } from "@/lib/meal-planner"
 
 export const EFFORT_LABEL: Record<string, string> = { easy: "Easy", medium: "Medium", ambitious: "Ambitious" }
@@ -109,5 +113,30 @@ function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; va
       <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{icon}{label}</p>
       <p className="font-display text-[19px] font-semibold mt-0.5">{value}</p>
     </div>
+  )
+}
+
+/** Adds a meal's ingredients to the Groceries list, only when pressed. */
+export function AddIngredientsButton({ ingredients }: { ingredients: Ingredient[] }) {
+  const supabase = useRef(createClient()).current
+  const [busy, setBusy] = useState(false)
+  async function add() {
+    setBusy(true)
+    try {
+      const names = ingredients.map((i) => (i.qty ? `${i.name} (${i.qty})` : i.name))
+      const { added, skipped, listName } = await addToGroceries(supabase, names)
+      toast.success(added
+        ? `Added ${added} item${added === 1 ? "" : "s"} to ${listName}${skipped ? ` (${skipped} already there)` : ""}`
+        : `Everything is already on ${listName}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't add to the shopping list")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button variant="outline" className="rounded-xl gap-2" onClick={add} disabled={busy || ingredients.length === 0}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : <ShoppingCart className="size-4" />} Add to shopping list
+    </Button>
   )
 }

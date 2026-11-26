@@ -73,7 +73,7 @@ export default function RootLayout({
                 <Sidebar />
                 <div className="flex-1 min-w-0 flex flex-col lg:h-screen">
                   <TopBar />
-                  <main className="flex-1 overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
+                  <main className="flex-1 lg:overflow-y-auto pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
                     {children}
                   </main>
                 </div>
