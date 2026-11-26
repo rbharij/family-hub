@@ -12,7 +12,7 @@ import {
   type PlannedMeal, type RecipeDetail, type SlotKey, type LunchKind,
 } from "@/lib/meal-planner"
 import { DAY_FULL } from "../_utils"
-import { RecipeBody, EFFORT_LABEL } from "../_recipe-body"
+import { RecipeBody, EFFORT_LABEL, AddIngredientsButton } from "../_recipe-body"
 import { createClient } from "@/lib/supabase"
 
 export function RecipeDialog({
@@ -191,6 +191,9 @@ export function RecipeDialog({
               <Snowflake className="size-4" /> {meal.frozen_done ? "Extra portions frozen" : `Add ${meal.freeze_portions} to freezer`}
             </Button>
           ) : null}
+          <AddIngredientsButton
+            ingredients={recipe?.ingredients?.length ? recipe.ingredients : (meal.ingredients ?? [])}
+          />
           <Button variant="outline" className="rounded-xl gap-2" onClick={() => onSaveRecipe(recipe)} disabled={!recipe && !meal.ingredients?.length}>
             <BookmarkPlus className="size-4" /> Save to recipes
           </Button>
