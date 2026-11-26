@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { addDaysStr, weekdayIndex, type RecipeDetail, type SlotKey, type WeekPlan } from "@/lib/meal-planner"
-import { RecipeBody } from "./_recipe-body"
+import { RecipeBody, AddIngredientsButton } from "./_recipe-body"
 import { SLOT_STYLES } from "./_slot-style"
 import { DAY_FULL, type Meal, type MealType } from "./_utils"
 
@@ -111,6 +111,7 @@ export function MealView({ open, onClose, meal, dayIndex, mealType, memberName, 
           <Button className="rounded-xl gap-2" onClick={onEdit}>
             <Pencil className="size-4" /> Edit meal
           </Button>
+          <AddIngredientsButton ingredients={recipe?.ingredients ?? []} />
           <Button variant="outline" className="rounded-xl gap-2" onClick={saveToRecipes} disabled={!recipe}>
             <BookmarkPlus className="size-4" /> Save to recipes
           </Button>

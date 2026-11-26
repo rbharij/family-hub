@@ -382,7 +382,7 @@ export default function ShoppingPage() {
 
       <h1 className="font-display text-[26px] lg:text-[34px] font-semibold tracking-tight leading-tight shrink-0">Shopping</h1>
 
-      {/* ── Custom tab row ─────────────────────────────────────────────────── */}
+      {/* ── Custom tab row ───────────────────────────────────────────────── */}
       <div
         role="tablist"
         className="flex items-center gap-1 overflow-x-auto shrink-0 rounded-2xl bg-secondary p-1 self-start max-w-full"
@@ -546,10 +546,10 @@ export default function ShoppingPage() {
         )}
       </div>
 
-      {/* ── Tab panels ─────────────────────────────────────────────────────── */}
+      {/* ── Tab panels ───────────────────────────────────────────────────── */}
       {/* Render only the active panel — avoids absolute-positioning collapsing
           the container to 0 height on mobile (where there is no h-full). */}
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 lg:overflow-hidden">
         {lists.map(list => list.id === activeTab && (
           <ErrorBoundary key={list.id} label={`${list.name} list`}>
             <ListPanel
@@ -620,7 +620,7 @@ export default function ShoppingPage() {
   )
 }
 
-// ── List panel ─────────────────────────────────────────────────────────────────
+// ── List panel ─────────────────────────────────────────────────────────────
 
 interface ListPanelProps {
   list: ShoppingList
@@ -667,82 +667,11 @@ function ListPanel({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 rounded-[28px] bg-card border border-border overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
-        {/* Panel header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-2">
-          <span className="text-sm font-semibold text-muted-foreground tabular-nums">
-            {unchecked.length} remaining · {checked.length} done
-          </span>
-          <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
-            <DropdownMenuTrigger
-              className="inline-flex items-center justify-center size-10 rounded-xl hover:bg-secondary transition-colors"
-              aria-label="List options"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                disabled={checked.length === 0}
-                onSelect={onClearCompleted}
-              >
-                Clear completed ({checked.length})
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={items.length === 0}
-                onSelect={openDialog(() => setClearAllOpen(true))}
-                className="text-destructive focus:text-destructive"
-              >
-                Clear all ({items.length})
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {loading ? (
-          <div className="px-4 py-4 space-y-2">
-            {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-12 rounded-lg" />)}
-          </div>
-        ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-            <ShoppingCart className="size-9" />
-            <p className="text-base font-semibold">This list is empty</p>
-            <p className="text-sm">Add items using the input below.</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border/70">
-            {unchecked.map(item => (
-              <ItemRow key={item.id} item={item}
-                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
-            ))}
-            {unchecked.length > 0 && checked.length > 0 && (
-              <li className="px-5 py-2 bg-secondary/50">
-                <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  In the trolley ({checked.length})
-                </span>
-              </li>
-            )}
-            {checked.map(item => (
-              <ItemRow key={item.id} item={item}
-                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* Add item bar */}
-      <div className="shrink-0 border-t border-border bg-card">
-        {checked.length > 0 && (
-          <div className="px-3 pt-2">
-            <Button variant="outline"
-              className="w-full text-muted-foreground h-11 gap-1.5 text-sm rounded-xl bg-card"
-              onClick={onClearCompleted}
-            >
-              <Check className="h-4 w-4" />
-              Clear {checked.length} completed item{checked.length !== 1 ? "s" : ""}
-            </Button>
-          </div>
-        )}
+    <div className="flex flex-col flex-1 min-h-0 rounded-[28px] bg-card border border-border lg:overflow-hidden">
+      {/* Add item bar: always in view. On phones it sticks to the top of the
+          screen while the list scrolls; on larger screens the list scrolls
+          beneath it inside the panel. */}
+      <div className="sticky top-14 lg:top-0 z-10 shrink-0 rounded-t-[28px] border-b border-border bg-card">
         <div className="px-3 lg:px-4 py-3 space-y-2">
           <div className="flex gap-2">
             <Input
@@ -781,6 +710,81 @@ function ListPanel({
         </div>
       </div>
 
+      <div className="flex-1 lg:overflow-y-auto">
+        {/* Panel header */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-2">
+          <span className="text-sm font-semibold text-muted-foreground tabular-nums">
+            {unchecked.length} remaining · {checked.length} done
+          </span>
+          <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+            <DropdownMenuTrigger
+              className="inline-flex items-center justify-center size-10 rounded-xl hover:bg-secondary transition-colors"
+              aria-label="List options"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                disabled={checked.length === 0}
+                onSelect={onClearCompleted}
+              >
+                Clear completed ({checked.length})
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={items.length === 0}
+                onSelect={openDialog(() => setClearAllOpen(true))}
+                className="text-destructive focus:text-destructive"
+              >
+                Clear all ({items.length})
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {loading ? (
+          <div className="px-4 py-4 space-y-2">
+            {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-12 rounded-lg" />)}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+            <ShoppingCart className="size-9" />
+            <p className="text-base font-semibold">This list is empty</p>
+            <p className="text-sm">Add items using the box above.</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border/70">
+            {unchecked.map(item => (
+              <ItemRow key={item.id} item={item}
+                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
+            ))}
+            {unchecked.length > 0 && checked.length > 0 && (
+              <li className="px-5 py-2 bg-secondary/50">
+                <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  In the trolley ({checked.length})
+                </span>
+              </li>
+            )}
+            {checked.map(item => (
+              <ItemRow key={item.id} item={item}
+                onToggle={onToggle} onDelete={onDelete} onUpdate={onUpdate} />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Clear completed */}
+      {checked.length > 0 && (
+        <div className="shrink-0 border-t border-border bg-card px-3 py-2 rounded-b-[28px]">
+          <Button variant="outline"
+            className="w-full text-muted-foreground h-11 gap-1.5 text-sm rounded-xl bg-card"
+            onClick={onClearCompleted}
+          >
+            <Check className="h-4 w-4" />
+            Clear {checked.length} completed item{checked.length !== 1 ? "s" : ""}
+          </Button>
+        </div>
+      )}
+
       {/* Clear all confirmation */}
       <Dialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
         <DialogContent className="max-w-sm">
@@ -802,7 +806,7 @@ function ListPanel({
   )
 }
 
-// ── Item row ───────────────────────────────────────────────────────────────────
+// ── Item row ───────────────────────────────────────────────────────────────
 
 const LONG_PRESS_ITEM = 500
 
