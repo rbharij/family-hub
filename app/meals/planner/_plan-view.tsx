@@ -21,6 +21,7 @@ import {
 } from "@/lib/meal-planner"
 import { DAY_FULL, DAY_LABELS, toDateStr } from "../_utils"
 import { RecipeDialog } from "./_recipe-dialog"
+import { addToGroceries } from "@/lib/shopping"
 import { SLOT_STYLES } from "../_slot-style"
 
 const PLAN_TABLES = [{ table: "meal_plans" }, { table: "freezer_items" }] as const
@@ -37,6 +38,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
   const [busySlot, setBusySlot]   = useState<string | null>(null) // `${date}|${slot}`
   const [instructions, setInstructions] = useState("")
   const [showShopping, setShowShopping] = useState(false)
+  const [addingShopping, setAddingShopping] = useState(false)
   const [openMeal, setOpenMeal]   = useState<{ date: string; slot: SlotKey } | null>(null)
   const [settings, setSettings]   = useState<Pick<PlannerSettings, "veg_dinners_per_week" | "max_same_protein"> | null>(null)
 
@@ -167,6 +169,20 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     if (saved && slot === "dinner" && titleChanged) syncLinked(date)
   }
 
+  async function addWeekToShopping() {
+    setAddingShopping(true)
+    try {
+      const { added, skipped, listName } = await addToGroceries(supabase, shopping.map(shoppingItemLabel))
+      toast.success(added
+        ? `Added ${added} item${added === 1 ? "" : "s"} to ${listName}${skipped ? ` (${skipped} already there)` : ""}`
+        : `Everything is already on ${listName}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't add to the shopping list")
+    } finally {
+      setAddingShopping(false)
+    }
+  }
+
   async function setSkip(date: string, slot: SlotKey, skip: boolean) {
     setBusySlot(`${date}|${slot}`)
     try {
@@ -273,7 +289,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
     return SLOTS.map((s) => day[s]).filter((m): m is PlannedMeal => Boolean(m && m.source === "freezer"))
   }, [plan, tomorrowStr])
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -318,7 +334,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Status bar ───────────────────────────────────────────────────── */}
+      {/* ── Status bar ───────────────────────────────────────────────────────────── */}
       <div className="rounded-[24px] bg-card border border-border p-4 lg:p-5 flex flex-col lg:flex-row lg:items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -334,7 +350,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
           </div>
           {plan.summary && <p className="mt-2 text-[15px] leading-snug">{plan.summary}</p>}
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Click any meal to see the recipe and other options. Lock the ones you want to keep, then confirm to fill the Meals page, use freezer portions and add to the shopping list.
+            Click any meal to see the recipe and other options. Lock the ones you want to keep, then confirm to fill the Meals page and use freezer portions. Nothing goes on the shopping list unless you add it.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -388,9 +404,17 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
       {/* ── Shopping preview ─────────────────────────────────────────────── */}
       {showShopping && (
         <div className="rounded-[24px] bg-card border border-border p-5">
-          <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
-            Shopping list (added to Groceries when you confirm)
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Ingredients for this week
+            </p>
+            {shopping.length > 0 && (
+              <Button className="h-10 rounded-xl gap-2" onClick={addWeekToShopping} disabled={addingShopping}>
+                {addingShopping ? <Loader2 className="size-4 animate-spin" /> : <ShoppingCart className="size-4" />}
+                Add {shopping.length} to shopping list
+              </Button>
+            )}
+          </div>
           {shopping.length === 0 ? (
             <p className="text-muted-foreground">Nothing to buy: everything comes from the freezer or leftovers.</p>
           ) : (
@@ -426,7 +450,7 @@ export function PlanView({ weekStart, onOpenSetup }: { weekStart: string; onOpen
         </div>
       )}
 
-      {/* ── Days ─────────────────────────────────────────────────────────── */}
+      {/* ── Days ─────────────────────────────────────────────────────────────────── */}
       {/* Wide screens: rows by meal type so every day lines up */}
       <div className="hidden xl:block">
         <PlanGrid
@@ -666,7 +690,7 @@ function SkippedCell({ slot, busy, onRestore, mobile = false }: {
   )
 }
 
-// ── Day card ───────────────────────────────────────────────────────────────────
+// ── Day card ───────────────────────────────────────────────────────────────
 
 function DayCard({
   day, isToday, isBatchDay, freezer, busySlot, onUpdate, onFreeze, onSaveRecipe, onOpen, onSkip,
@@ -745,7 +769,7 @@ function DayCard({
   )
 }
 
-// ── Meal card ──────────────────────────────────────────────────────────────────
+// ── Meal card ──────────────────────────────────────────────────────────────
 
 function MealCard({
   date, slot, meal, lunchKind, freezerItem, busy, onUpdate, onFreeze, onSaveRecipe, onOpen, onSkip,
